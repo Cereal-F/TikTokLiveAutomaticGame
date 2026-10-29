@@ -12,19 +12,41 @@ const PALETTE: Record<string, number> = {
   r: 0xe8413c,
   g: 0x4ade80,
   p: 0xb36bff,
+  B: 0x1e3a8a,
+  c: 0x67e8f9,
+  s: 0xcbd5e1,
 };
 
+/** Defensor azul: elmo com viseira, tabardo branco com cinto dourado e escudo ciano na lateral. */
 const HERO_ROWS = [
-  "...kkkk...",
-  "..kwwwwk..",
-  "..kwbbwk..",
-  "...kkkk...",
-  "..kbbbbk..",
-  ".kbbyybbk.",
-  ".kbbbbbbk.",
-  "..kbbbbk..",
-  "..kk..kk..",
-  ".kk....kk.",
+  "....kkkk....",
+  "...kbbbbk...",
+  "..kbbbbbbk..",
+  ".kbbcccbbbk.",
+  ".kbbbbbbbbk.",
+  "kkBBBBBBBBkk",
+  "kBbbwwwwbbBk",
+  "kBbbwyywbbBk",
+  "kcBbwwwwbbBk",
+  "ksBBbbbbBBsk",
+  ".kkk....kkk.",
+  "..kk....kk..",
+];
+
+/** Chefe: corpo vermelho com chifres, olhos amarelos e dentes. */
+const BOSS_ROWS = [
+  "w..kkkkkkkk..w",
+  "ww.krrrrrrk.ww",
+  ".wkrrrrrrrrkw.",
+  ".kkrryrryyrkk.",
+  "kkrrrrrrrrrrkk",
+  "krrrwwrrwwrrrk",
+  "krrrrrrrrrrrrk",
+  "krkrkrkrkrkrrk",
+  "krrrrprrprrrrk",
+  ".krrrrrrrrrrk.",
+  "..kk.kkkk.kk..",
+  ".k..k....k..k.",
 ];
 
 const MONSTER_ROWS = [
@@ -82,6 +104,7 @@ export function createPixelTextures(scene: Phaser.Scene): void {
   const pixel = 4;
   if (!scene.textures.exists("hero")) drawPixelSprite(scene, "hero", HERO_ROWS, pixel);
   if (!scene.textures.exists("monster")) drawPixelSprite(scene, "monster", MONSTER_ROWS, pixel);
+  if (!scene.textures.exists("boss")) drawPixelSprite(scene, "boss", BOSS_ROWS, pixel);
   if (!scene.textures.exists("projectile")) drawPixelSprite(scene, "projectile", PROJECTILE_ROWS, 2);
   if (!scene.textures.exists("floor")) drawFloorTile(scene, "floor");
 }

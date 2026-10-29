@@ -4,13 +4,23 @@ import type { LeaderboardEntry } from "../../shared/protocol.js";
 import type { LiveFeedback, SessionPhase } from "../core/GameSession.js";
 import { WORLD } from "../core/constants.js";
 import { formatTime } from "../core/format.js";
+import { GIFT_POWERS, giftTier, powerSummary } from "../core/powers.js";
+import { upcomingWaves } from "../core/waves.js";
 
 const FONT = "monospace";
 const FEEDBACK_LIFETIME_MS = 6_000;
 const MAX_FEEDBACK_LINES = 5;
 const MAX_GIFT_LINES = 4;
 const MAX_TEXT_CHARS = 40;
-const LEADER_NAME_CHARS = 14;
+const LEADER_NAME_CHARS = 11;
+
+/** Faixa de ondas: a atual e as próximas, lado a lado, no topo da tela. */
+const STRIP = { x: 24, y: 180, blockWidth: 128, blockHeight: 56, gap: 8, count: 5 } as const;
+const PANEL_Y = 262;
+const LEGEND_PANEL = { x: 24, width: 384, height: 160 } as const;
+const LEADER_PANEL = { x: 420, width: 276, height: 160 } as const;
+/** Borda direita do texto do top 3, com margem interna do painel. */
+const LEADER_RIGHT = LEADER_PANEL.x + LEADER_PANEL.width - 12;
 
 interface SessionSnapshot {
   hp: number;
@@ -44,6 +54,20 @@ const TIER_COLORS: Record<number, string> = {
   3: "#ff9f43",
   4: "#ff5e7e",
 };
+
+const STRIP_COLORS = {
+  current: 0xffd23f,
+  normal: 0x1b2340,
+  boss: 0x4a1020,
+  bossBorder: 0xff5e7e,
+} as const;
+
+interface WaveBlock {
+  body: Phaser.GameObjects.Rectangle;
+  border: Phaser.GameObjects.Rectangle;
+  label: Phaser.GameObjects.Text;
+  horns: Phaser.GameObjects.Graphics;
+}
 
 /** Pilha de linhas de texto: a mais recente fica no topo e as antigas somem com o tempo. */
 class TextStack {
@@ -94,6 +118,8 @@ export class Hud {
   private readonly connectionText: Phaser.GameObjects.Text;
   private readonly bannerText: Phaser.GameObjects.Text;
   private readonly leaderLines: Phaser.GameObjects.Text[] = [];
+  private readonly waveBlocks: WaveBlock[] = [];
+  private shownWave = -1;
   private readonly feedback: TextStack;
   private readonly gifts: TextStack;
   private readonly hpMaxWidth = 260;
@@ -113,18 +139,20 @@ export class Hud {
     this.timeText = scene.add.text(WORLD.width - 24, 24, "", label).setOrigin(1, 0).setDepth(depth);
     this.scoreText = scene.add.text(WORLD.width - 24, 60, "", { ...label, color: "#ffd23f" }).setOrigin(1, 0).setDepth(depth);
 
-    // Painel do top 3 de presentes, no canto superior direito.
-    const panelWidth = 270;
-    const panelX = WORLD.width - 24 - panelWidth;
-    scene.add.rectangle(panelX, 100, panelWidth, 150, 0x000000, 0.45).setOrigin(0).setDepth(depth - 1);
+    this.buildWaveStrip(scene, depth);
+    this.buildGiftLegend(scene, depth);
+
+    // Painel do top 3 de presentes, ao lado da legenda.
+    const panelX = LEADER_PANEL.x;
+    scene.add.rectangle(panelX, PANEL_Y, LEADER_PANEL.width, LEADER_PANEL.height, 0x000000, 0.45).setOrigin(0).setDepth(depth - 1);
     scene.add
-      .text(WORLD.width - 24, 108, "TOP 3 PRESENTES", { ...label, fontSize: "22px", color: "#ffd23f" })
+      .text(LEADER_RIGHT, PANEL_Y + 8, "TOP 3 PRESENTES", { ...label, fontSize: "20px", color: "#ffd23f" })
       .setOrigin(1, 0)
       .setDepth(depth);
     for (let i = 0; i < 3; i += 1) {
       this.leaderLines.push(
         scene.add
-          .text(WORLD.width - 24, 146 + i * 36, "", { ...label, fontSize: "22px" })
+          .text(LEADER_RIGHT, PANEL_Y + 46 + i * 36, "", { ...label, fontSize: "20px" })
           .setOrigin(1, 0)
           .setDepth(depth),
       );
@@ -155,9 +183,86 @@ export class Hud {
     this.timeText.setText(`TEMPO ${formatTime(snapshot.survivedMs)}`);
     this.scoreText.setText(`PONTOS ${snapshot.score}`);
     this.effectsText.setText(effectsLabel(snapshot.turboRemainingMs, snapshot.shieldRemainingMs));
+    this.showWaveStrip(snapshot.wave);
     const now = this.scene.time.now;
     this.feedback.fade(now);
     this.gifts.fade(now);
+  }
+
+  /** Faixa de ondas: blocos da onda atual e das próximas, com chifres nas rodadas de chefe. */
+  private buildWaveStrip(scene: Phaser.Scene, depth: number): void {
+    for (let i = 0; i < STRIP.count; i += 1) {
+      const x = STRIP.x + i * (STRIP.blockWidth + STRIP.gap);
+      const y = STRIP.y;
+      const body = scene.add.rectangle(x, y, STRIP.blockWidth, STRIP.blockHeight, STRIP_COLORS.normal).setOrigin(0).setDepth(depth - 1);
+      const border = scene.add
+        .rectangle(x, y, STRIP.blockWidth, STRIP.blockHeight, 0x000000, 0)
+        .setOrigin(0)
+        .setStrokeStyle(3, STRIP_COLORS.bossBorder)
+        .setDepth(depth)
+        .setVisible(false);
+      const label = scene.add
+        .text(x + STRIP.blockWidth / 2, y + STRIP.blockHeight / 2, "", {
+          fontFamily: FONT,
+          fontSize: "18px",
+          color: "#e8ecff",
+          align: "center",
+          stroke: "#000000",
+          strokeThickness: 3,
+        })
+        .setOrigin(0.5)
+        .setDepth(depth);
+      // Chifres acima do bloco, desenhados uma vez e exibidos só nas rodadas de chefe.
+      const cx = x + STRIP.blockWidth / 2;
+      const horns = scene.add.graphics().setDepth(depth).setVisible(false);
+      horns.fillStyle(0xf8fafc, 1);
+      horns.fillTriangle(cx - 24, y, cx - 12, y, cx - 30, y - 16);
+      horns.fillTriangle(cx + 24, y, cx + 12, y, cx + 30, y - 16);
+      this.waveBlocks.push({ body, border, label, horns });
+    }
+  }
+
+  private showWaveStrip(wave: number): void {
+    if (wave === this.shownWave) return;
+    this.shownWave = wave;
+    upcomingWaves(wave, STRIP.count).forEach((entry, i) => {
+      const block = this.waveBlocks[i];
+      if (!block) return;
+      const current = i === 0;
+      block.body.setFillStyle(current ? STRIP_COLORS.current : entry.isBoss ? STRIP_COLORS.boss : STRIP_COLORS.normal);
+      block.border.setVisible(entry.isBoss);
+      block.horns.setVisible(entry.isBoss);
+      block.label.setText(current ? `ONDA ${entry.wave}\nAGORA` : entry.isBoss ? `ONDA ${entry.wave}\nCHEFE` : `ONDA ${entry.wave}`);
+      block.label.setColor(current ? "#0b0b12" : "#e8ecff");
+    });
+  }
+
+  /** Legenda fixa: o que cada faixa de diamantes faz. */
+  private buildGiftLegend(scene: Phaser.Scene, depth: number): void {
+    const { x, width, height } = LEGEND_PANEL;
+    scene.add.rectangle(x, PANEL_Y, width, height, 0x000000, 0.45).setOrigin(0).setDepth(depth - 1);
+    scene.add
+      .text(x + 12, PANEL_Y + 8, "O QUE OS PRESENTES FAZEM", {
+        fontFamily: FONT,
+        fontSize: "18px",
+        color: "#ffd23f",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setDepth(depth);
+    GIFT_POWERS.forEach((power, i) => {
+      const color = TIER_COLORS[giftTier(power)] ?? "#ffffff";
+      const line = `${String(power.minDiamonds).padStart(3)}+ ${power.label.padEnd(10)} ${powerSummary(power)}`;
+      scene.add
+        .text(x + 12, PANEL_Y + 44 + i * 28, line, {
+          fontFamily: FONT,
+          fontSize: "15px",
+          color,
+          stroke: "#000000",
+          strokeThickness: 3,
+        })
+        .setDepth(depth);
+    });
   }
 
   /** Mostra o recorde de ondas guardado pelo servidor (null = ainda não carregado). */

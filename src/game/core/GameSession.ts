@@ -1,5 +1,5 @@
 import type { LiveEvent } from "../../shared/events.js";
-import { LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
+import { BOSS, LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
 import { powerForGift, type GiftPower } from "./powers.js";
 import { killPoints, waveConfig, type WaveConfig } from "./waves.js";
 
@@ -14,7 +14,8 @@ export interface SessionStats {
 
 /** Acontecimentos que a cena precisa tratar (criar inimigos, mostrar banners, aplicar áreas, encerrar a partida). */
 export type SessionEvent =
-  | { type: "spawn" }
+  /** `boss` é verdadeiro só para o chefe da onda, que é o primeiro inimigo criado nela. */
+  | { type: "spawn"; boss: boolean }
   | { type: "waveStarted"; wave: number }
   | { type: "waveCleared"; wave: number }
   | { type: "playerHit"; damage: number; hp: number }
@@ -147,18 +148,18 @@ export class GameSession {
       while (this.spawnTimerMs <= 0 && this.spawnedInWave < config.enemyCount) {
         this.spawnedInWave += 1;
         this.spawnTimerMs += config.spawnIntervalMs;
-        events.push({ type: "spawn" });
+        events.push({ type: "spawn", boss: config.isBoss && this.spawnedInWave === 1 });
       }
     }
     return events;
   }
 
-  registerKill(): SessionEvent[] {
+  registerKill(isBoss = false): SessionEvent[] {
     if (this.currentPhase !== "playing") return [];
 
     this.killedInWave += 1;
     this.currentKills += 1;
-    this.currentScore += killPoints(this.currentWave);
+    this.currentScore += isBoss ? killPoints(this.currentWave) * BOSS.pointsMultiplier : killPoints(this.currentWave);
 
     if (this.killedInWave >= waveConfig(this.currentWave).enemyCount) {
       this.currentPhase = "intermission";

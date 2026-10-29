@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Autopilot, type AutopilotView } from "../../src/game/core/autopilot.js";
-import { AUTOPILOT, WORLD } from "../../src/game/core/constants.js";
+import { AUTOPILOT, DASH, WORLD } from "../../src/game/core/constants.js";
 
 const center = { x: WORLD.width / 2, y: WORLD.height / 2 };
 
@@ -67,5 +67,38 @@ describe("Autopilot", () => {
     const a = new Autopilot(() => 0.2).steer(view(enemies));
     const b = new Autopilot(() => 0.2).steer(view(enemies));
     expect(a).toEqual(b);
+  });
+});
+
+describe("Autopilot: arrancadas (dash)", () => {
+  it("sem sorteio de intervalo, dispara uma arrancada no tempo mínimo e a mantém pela duração", () => {
+    const pilot = new Autopilot(() => 0);
+    // Intervalo mínimo: nenhuma arrancada antes do primeiro intervalo.
+    expect(pilot.dashMultiplier(DASH.minIntervalMs - 100)).toBe(1);
+    expect(pilot.dashMultiplier(100)).toBe(DASH.multiplier);
+    // Continua acelerado enquanto a arrancada dura, depois volta ao normal.
+    expect(pilot.dashMultiplier(DASH.durationMs - 50)).toBe(DASH.multiplier);
+    expect(pilot.dashMultiplier(100)).toBe(DASH.multiplier);
+    expect(pilot.dashMultiplier(DASH.durationMs * 2)).toBe(1);
+    expect(pilot.dashMultiplier(16)).toBe(1);
+  });
+
+  it("nunca dispara antes do intervalo mínimo nem deixa de disparar por muito tempo", () => {
+    const pilot = new Autopilot(() => 0.5);
+    let elapsed = 0;
+    let firstDashAt = -1;
+    while (elapsed < DASH.maxIntervalMs + DASH.durationMs && firstDashAt < 0) {
+      elapsed += 16;
+      if (pilot.dashMultiplier(16) !== 1) firstDashAt = elapsed;
+    }
+    expect(firstDashAt).toBeGreaterThanOrEqual(DASH.minIntervalMs);
+    expect(firstDashAt).toBeLessThanOrEqual(DASH.maxIntervalMs + 16);
+  });
+
+  it("reset reinicia o ciclo de arrancadas", () => {
+    const pilot = new Autopilot(() => 0);
+    pilot.dashMultiplier(DASH.minIntervalMs);
+    pilot.reset();
+    expect(pilot.dashMultiplier(DASH.minIntervalMs - 100)).toBe(1);
   });
 });

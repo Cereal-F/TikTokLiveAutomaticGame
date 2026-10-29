@@ -1,3 +1,5 @@
+import { LIVE_EFFECTS } from "./constants.js";
+
 /**
  * Poderes ativados por presentes da live. Quanto mais caro o presente, mais forte o poder.
  * O poder depende só do valor em diamantes, então funciona com qualquer nome de presente.
@@ -51,4 +53,19 @@ export function powerForGift(diamonds: number): GiftPower | null {
 /** Nível do poder (1 a 4), usado para cores e destaques na tela. */
 export function giftTier(power: GiftPower): number {
   return GIFT_POWERS.indexOf(power) + 1;
+}
+
+/** Resumo curto do efeito, para o painel de presentes na tela. */
+export function powerSummary(power: GiftPower): string {
+  const seconds = (ms: number): number => Math.round(ms / 1000);
+  switch (power.kind) {
+    case "turbo":
+      return `ataque ${LIVE_EFFECTS.boostAttackSpeedMultiplier}x · ${seconds(power.turboMs)}s`;
+    case "shield":
+      return `invulnerável · ${seconds(power.shieldMs)}s`;
+    case "nova":
+      return `explosão · dano ${power.blastDamage}`;
+    case "storm":
+      return `tela toda · +${power.heal} vida`;
+  }
 }

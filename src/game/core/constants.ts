@@ -5,9 +5,9 @@ export const WORLD = { width: 720, height: 1280 } as const;
 
 export const PLAYER = {
   radius: 18,
-  speed: 230,
+  speed: 260,
   maxHp: 100,
-  attackCooldownMs: 600,
+  attackCooldownMs: 450,
   attackRange: 320,
   /** Tempo sem receber dano após ser atingido. */
   invulnerabilityMs: 600,
@@ -18,6 +18,37 @@ export const PLAYER = {
 export const ENEMY = {
   radius: 16,
   contactDamage: 8,
+  /** Inimigos a menos desta distância se afastam uns dos outros: evita formarem um bloco. */
+  separationRadius: 60,
+  separationWeight: 2.2,
+} as const;
+
+/** Chefe: aparece a cada `every` ondas, com escolta de inimigos comuns. */
+export const BOSS = {
+  every: 5,
+  hpBase: 70,
+  hpPerBoss: 20,
+  /** Velocidade base em pixels por segundo (mais lento que o inimigo comum). */
+  speed: 70,
+  speedPerBoss: 8,
+  speedMax: 130,
+  radius: 26,
+  contactDamage: 20,
+  /** Quantos pontos vale o chefe em relação a um inimigo comum. */
+  pointsMultiplier: 5,
+} as const;
+
+/** Dash do piloto automático: arrancadas curtas e aleatórias que quebram a órbita constante. */
+export const DASH = {
+  minIntervalMs: 1_800,
+  maxIntervalMs: 3_200,
+  durationMs: 260,
+  multiplier: 2.6,
+} as const;
+
+/** Fator de velocidade de toda a partida. Maior = ondas, movimento e efeitos mais rápidos. */
+export const SPEED = {
+  timeScale: 1.5,
 } as const;
 
 export const PROJECTILE = {
@@ -37,9 +68,9 @@ export const LIVE_EFFECTS = {
 } as const;
 
 export const WAVES = {
-  intermissionMs: 2_500,
+  intermissionMs: 1_000,
   maxEnemiesPerWave: 60,
-  minSpawnIntervalMs: 250,
+  minSpawnIntervalMs: 200,
 } as const;
 
 /**
