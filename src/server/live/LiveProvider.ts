@@ -11,7 +11,7 @@ export interface ProviderSink {
 
 /**
  * Interface independente de fornecedor para fontes de eventos de live.
- * Implementações: SimulatedLiveProvider (testes locais) e TikTokLiveProvider (conector real).
+ * Implementações: SimulatedLiveProvider (testes locais) e TikFinityLiveProvider (WebSocket local do TikFinity).
  */
 export interface LiveProvider {
   readonly kind: ProviderKind;

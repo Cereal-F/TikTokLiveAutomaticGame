@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextBackoffMs } from "../../src/client/net/backoff.js";
+import { nextBackoffMs } from "../../src/shared/backoff.js";
 
 describe("nextBackoffMs", () => {
   it("cresce exponencialmente a partir do mínimo", () => {

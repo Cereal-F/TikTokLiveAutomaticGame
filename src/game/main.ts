@@ -3,7 +3,6 @@ import { WORLD } from "./core/constants.js";
 import { ArenaScene } from "./scenes/ArenaScene.js";
 import { BootScene } from "./scenes/BootScene.js";
 import { GameOverScene } from "./scenes/GameOverScene.js";
-import { MenuScene } from "./scenes/MenuScene.js";
 
 /**
  * Ponto de entrada do jogo. O canvas usa resolução vertical (720x1280) e escala
@@ -21,5 +20,5 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [BootScene, MenuScene, ArenaScene, GameOverScene],
+  scene: [BootScene, ArenaScene, GameOverScene],
 });

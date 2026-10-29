@@ -63,6 +63,18 @@ describe("SimulatedLiveProvider", () => {
     provider.stop();
   });
 
+  it("presente com valor escolhido usa o nome do catálogo quando existe", () => {
+    const provider = fixedProvider();
+    const { sink, raw } = recordingSink();
+    provider.start(sink);
+    provider.trigger("gift", 1, 500);
+    provider.trigger("gift", 1, 7);
+    provider.stop();
+    const [catalogue, custom] = raw as { giftName: string; diamonds: number }[];
+    expect(catalogue).toMatchObject({ giftName: "Foguete", diamonds: 500 });
+    expect(custom).toMatchObject({ giftName: "Presente 7", diamonds: 7 });
+  });
+
   it("gera ids únicos para deduplicação", () => {
     const provider = fixedProvider();
     const { sink, raw } = recordingSink();

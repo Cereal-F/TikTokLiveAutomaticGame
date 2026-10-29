@@ -32,8 +32,7 @@ export const LIVE_EFFECTS = {
   likesPerHeal: 20,
   likeHealAmount: 10,
   commentScore: 5,
-  giftBoostMs: 6_000,
-  /** Multiplicador de cadência de ataque durante o boost. */
+  /** Multiplicador de cadência de ataque durante o turbo. */
   boostAttackSpeedMultiplier: 1.6,
 } as const;
 
@@ -41,4 +40,29 @@ export const WAVES = {
   intermissionMs: 2_500,
   maxEnemiesPerWave: 60,
   minSpawnIntervalMs: 250,
+} as const;
+
+/**
+ * Piloto automático: o personagem se move sozinho (a transmissão é automática).
+ * Distâncias em pixels da arena lógica.
+ */
+export const AUTOPILOT = {
+  /** Faixa junto às bordas em que o personagem é empurrado para dentro. */
+  edgeMargin: 130,
+  /** Inimigo mais perto que isto faz o personagem fugir. */
+  fleeDistance: 150,
+  /** Entre fuga e órbita, o personagem circula o inimigo mais próximo (dentro do alcance de ataque). */
+  orbitDistance: 300,
+  /** Raio considerado ao calcular a fuga de vários inimigos. */
+  dangerRadius: 220,
+  /** Peso do empurrão das bordas em relação às outras intenções. */
+  edgePushWeight: 2.5,
+  /** Sem inimigos, o personagem vagueia entre pontos sorteados dentro desta margem. */
+  wanderInset: 200,
+  waypointReachedDistance: 40,
+} as const;
+
+/** Reinício automático da partida após a derrota. */
+export const RUN = {
+  restartDelayMs: 6_000,
 } as const;

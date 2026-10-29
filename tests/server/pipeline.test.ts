@@ -82,9 +82,9 @@ describe("LikeCounter", () => {
   it("acumula curtidas e entrega o total de uma vez", () => {
     const counter = new LikeCounter();
     counter.add(2, "simulation");
-    counter.add(3, "tiktok");
+    counter.add(3, "tikfinity");
     expect(counter.pendingCount).toBe(5);
-    expect(counter.take()).toEqual({ count: 5, source: "tiktok" });
+    expect(counter.take()).toEqual({ count: 5, source: "tikfinity" });
     expect(counter.take()).toBeNull();
     expect(counter.pendingCount).toBe(0);
   });

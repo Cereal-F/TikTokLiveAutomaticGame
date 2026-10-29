@@ -1,16 +1,21 @@
 import { fileURLToPath } from "node:url";
 import type { ProviderKind } from "../shared/protocol.js";
+import { isLocalWebSocketUrl } from "./live/tikfinity/localUrl.js";
 
 export interface ServerConfig {
   host: string;
   port: number;
   provider: ProviderKind;
-  tiktokUsername?: string;
+  /** WebSocket local do TikFinity (apenas ws:// para localhost). */
+  tikfinityUrl: string;
   /** Pasta com o build do cliente (saída do `vite build`). */
   staticRoot: string;
+  /** Arquivo JSON com o recorde de ondas (fica fora do código e é ignorado pelo git). */
+  recordsFile: string;
 }
 
 const DEFAULT_PORT = 3000;
+export const DEFAULT_TIKFINITY_URL = "ws://localhost:21213/";
 
 /**
  * Lê a configuração de variáveis de ambiente.
@@ -23,17 +28,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   }
 
   const providerRaw = env.LIVE_PROVIDER ?? "simulation";
-  if (providerRaw !== "simulation" && providerRaw !== "tiktok") {
-    throw new Error(`LIVE_PROVIDER deve ser "simulation" ou "tiktok" (recebido: ${providerRaw})`);
+  if (providerRaw !== "simulation" && providerRaw !== "tikfinity") {
+    throw new Error(`LIVE_PROVIDER deve ser "simulation" ou "tikfinity" (recebido: ${providerRaw})`);
   }
 
-  const username = env.TIKTOK_USERNAME?.trim();
+  const tikfinityUrl = env.TIKFINITY_URL?.trim() || DEFAULT_TIKFINITY_URL;
+  if (!isLocalWebSocketUrl(tikfinityUrl)) {
+    throw new Error("TIKFINITY_URL deve ser ws://localhost:<porta> (somente a própria máquina)");
+  }
 
   return {
     host: env.HOST ?? "127.0.0.1",
     port,
     provider: providerRaw,
-    tiktokUsername: username && username.length > 0 ? username : undefined,
+    tikfinityUrl,
     staticRoot: fileURLToPath(new URL("../../dist/client", import.meta.url)),
+    recordsFile: fileURLToPath(new URL("../../data/records.json", import.meta.url)),
   };
 }

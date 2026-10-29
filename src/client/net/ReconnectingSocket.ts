@@ -1,5 +1,5 @@
 import type { ClientMessage, ClientRole, ServerMessage } from "../../shared/protocol.js";
-import { nextBackoffMs } from "./backoff.js";
+import { nextBackoffMs } from "../../shared/backoff.js";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 
@@ -69,8 +69,9 @@ export class ReconnectingSocket {
 
     socket.addEventListener("open", () => {
       this.attempt = 0;
-      this.options.onState("open");
+      // O hello vem antes da notificação: quem reage a "open" já pode enviar comandos.
       this.send({ type: "hello", role: this.options.role });
+      this.options.onState("open");
     });
 
     socket.addEventListener("message", (event: MessageEvent<unknown>) => {
