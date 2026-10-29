@@ -1,4 +1,4 @@
-import { AUTOPILOT } from "./constants.js";
+import { AUTOPILOT, DASH } from "./constants.js";
 import { directionTo, distance, findNearest, type Point } from "./targeting.js";
 
 export interface AutopilotView {
@@ -37,11 +37,39 @@ function edgePush(p: Point, world: { width: number; height: number }): Point {
  */
 export class Autopilot {
   private waypoint: Point | null = null;
+  private dashRemainingMs = 0;
+  private nextDashInMs: number;
 
-  constructor(private readonly random: () => number = Math.random) {}
+  constructor(private readonly random: () => number = Math.random) {
+    this.nextDashInMs = this.drawDashInterval();
+  }
 
   reset(): void {
     this.waypoint = null;
+    this.dashRemainingMs = 0;
+    this.nextDashInMs = this.drawDashInterval();
+  }
+
+  /**
+   * Multiplicador de velocidade para este intervalo. Dispara arrancadas curtas em
+   * intervalos aleatórios, para o personagem não ficar só girando em volta dos inimigos.
+   */
+  dashMultiplier(dtMs: number): number {
+    if (this.dashRemainingMs > 0) {
+      this.dashRemainingMs -= dtMs;
+      return DASH.multiplier;
+    }
+    this.nextDashInMs -= dtMs;
+    if (this.nextDashInMs <= 0) {
+      this.dashRemainingMs = DASH.durationMs;
+      this.nextDashInMs = this.drawDashInterval();
+      return DASH.multiplier;
+    }
+    return 1;
+  }
+
+  private drawDashInterval(): number {
+    return DASH.minIntervalMs + this.random() * (DASH.maxIntervalMs - DASH.minIntervalMs);
   }
 
   steer(view: AutopilotView): Point {

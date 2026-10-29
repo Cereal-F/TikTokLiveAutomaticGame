@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GIFT_POWERS, giftTier, powerForGift } from "../../src/game/core/powers.js";
+import { GIFT_POWERS, giftTier, powerForGift, powerSummary } from "../../src/game/core/powers.js";
 
 describe("powerForGift", () => {
   it("sem diamantes não há poder", () => {
@@ -25,5 +25,14 @@ describe("powerForGift", () => {
 describe("giftTier", () => {
   it("numera os poderes de 1 a 4 em ordem de valor", () => {
     expect(GIFT_POWERS.map(giftTier)).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("powerSummary", () => {
+  it("descreve cada poder com o efeito principal", () => {
+    expect(powerSummary(GIFT_POWERS[0]!)).toContain("ataque");
+    expect(powerSummary(GIFT_POWERS[1]!)).toContain("invulnerável");
+    expect(powerSummary(GIFT_POWERS[2]!)).toContain("dano 4");
+    expect(powerSummary(GIFT_POWERS[3]!)).toContain("+25 vida");
   });
 });

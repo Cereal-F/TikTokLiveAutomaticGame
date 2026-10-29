@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { GameSession } from "../../src/game/core/GameSession.js";
-import { LIVE_EFFECTS, PLAYER, WAVES } from "../../src/game/core/constants.js";
+import { BOSS, LIVE_EFFECTS, PLAYER, WAVES } from "../../src/game/core/constants.js";
 import { GIFT_POWERS } from "../../src/game/core/powers.js";
+import { killPoints, waveConfig } from "../../src/game/core/waves.js";
 import { commentEvent, giftEvent, likeEvent } from "../helpers/events.js";
 
-/** Inicia uma sessão e faz nascer todos os inimigos da onda 1 (6 inimigos). */
+const WAVE_ONE = waveConfig(1).enemyCount;
+
+/** Inicia uma sessão e faz nascer todos os inimigos da onda 1. */
 function sessionWithWaveOneSpawned(): GameSession {
   const session = new GameSession();
   session.start();
@@ -24,24 +27,24 @@ describe("GameSession: ondas", () => {
   it("faz nascer exatamente a quantidade de inimigos da onda, sem passar disso", () => {
     const session = new GameSession();
     session.start();
-    expect(session.update(10_000).filter((e) => e.type === "spawn")).toHaveLength(6);
-    expect(session.enemiesAlive).toBe(6);
+    expect(session.update(10_000).filter((e) => e.type === "spawn")).toHaveLength(WAVE_ONE);
+    expect(session.enemiesAlive).toBe(WAVE_ONE);
     expect(session.update(10_000).filter((e) => e.type === "spawn")).toHaveLength(0);
   });
 
   it("limpa a onda ao derrotar todos os inimigos e entra em intervalo", () => {
     const session = sessionWithWaveOneSpawned();
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < WAVE_ONE - 1; i += 1) {
       expect(session.registerKill()).toEqual([]);
     }
     expect(session.registerKill()).toEqual([{ type: "waveCleared", wave: 1 }]);
     expect(session.phase).toBe("intermission");
-    expect(session.kills).toBe(6);
+    expect(session.kills).toBe(WAVE_ONE);
   });
 
   it("inicia a próxima onda depois do intervalo", () => {
     const session = sessionWithWaveOneSpawned();
-    for (let i = 0; i < 6; i += 1) session.registerKill();
+    for (let i = 0; i < WAVE_ONE; i += 1) session.registerKill();
 
     expect(session.update(WAVES.intermissionMs - 1)).toEqual([]);
     expect(session.wave).toBe(1);
@@ -52,7 +55,7 @@ describe("GameSession: ondas", () => {
 
   it("ignora abates durante o intervalo entre ondas", () => {
     const session = sessionWithWaveOneSpawned();
-    for (let i = 0; i < 6; i += 1) session.registerKill();
+    for (let i = 0; i < WAVE_ONE; i += 1) session.registerKill();
     const scoreBefore = session.score;
     expect(session.registerKill()).toEqual([]);
     expect(session.score).toBe(scoreBefore);
@@ -283,5 +286,47 @@ describe("GameSession: estatísticas", () => {
     const session = sessionWithWaveOneSpawned();
     session.registerKill();
     expect(session.stats()).toEqual({ wave: 1, score: 10, kills: 1, survivedMs: 10_000 });
+  });
+});
+
+/** Avança a partida até a onda desejada, derrotando todos os inimigos de cada onda. */
+function reachWave(target: number): GameSession {
+  const session = new GameSession();
+  session.start();
+  while (session.wave < target) {
+    session.update(60_000);
+    const count = waveConfig(session.wave).enemyCount;
+    for (let i = 0; i < count; i += 1) session.registerKill();
+    session.update(WAVES.intermissionMs);
+  }
+  return session;
+}
+
+describe("GameSession: chefes", () => {
+  it("a onda 1 não tem chefe: todos os inimigos nascem como comuns", () => {
+    const fresh = new GameSession();
+    fresh.start();
+    const created = fresh.update(60_000).filter((e) => e.type === "spawn");
+    expect(created).toHaveLength(WAVE_ONE);
+    expect(created.every((e) => e.type === "spawn" && e.boss === false)).toBe(true);
+  });
+
+  it("na onda 5, o primeiro inimigo que nasce é o chefe e os demais são escolta", () => {
+    const session = reachWave(5);
+    expect(session.wave).toBe(5);
+    const spawns = session.update(60_000).filter((e) => e.type === "spawn");
+    expect(spawns).toHaveLength(waveConfig(5).enemyCount);
+    expect(spawns[0]).toEqual({ type: "spawn", boss: true });
+    expect(spawns.slice(1).every((e) => e.type === "spawn" && e.boss === false)).toBe(true);
+  });
+
+  it("derrotar o chefe vale mais pontos e conta como abate", () => {
+    const session = reachWave(5);
+    session.update(60_000);
+    const scoreBefore = session.score;
+    const killsBefore = session.kills;
+    session.registerKill(true);
+    expect(session.score - scoreBefore).toBe(killPoints(5) * BOSS.pointsMultiplier);
+    expect(session.kills).toBe(killsBefore + 1);
   });
 });
