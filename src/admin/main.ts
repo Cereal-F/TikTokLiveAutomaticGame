@@ -76,6 +76,10 @@ function handleServerMessage(message: ServerMessage): void {
     case "error":
       appendLog(`erro do servidor: ${message.message}`, "error");
       return;
+    case "record":
+    case "leaderboard":
+      // O painel não exibe recorde nem ranking; o jogo mostra essas informações.
+      return;
   }
 }
 
@@ -89,8 +93,8 @@ const socket = new ReconnectingSocket({
   },
 });
 
-function sendSimulation(kind: LiveEventKind, count: number): void {
-  const sent = socket.send({ type: "admin:simulate", kind, count });
+function sendSimulation(kind: LiveEventKind, count: number, diamonds?: number): void {
+  const sent = socket.send({ type: "admin:simulate", kind, count, diamonds });
   if (!sent) appendLog("sem conexão com o servidor; evento não enviado", "error");
 }
 
@@ -98,9 +102,16 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("button[data-k
   button.addEventListener("click", () => {
     const kind = button.dataset.kind as LiveEventKind;
     const count = Number(button.dataset.count ?? "1");
-    sendSimulation(kind, Number.isInteger(count) && count > 0 ? count : 1);
+    const diamonds = button.dataset.diamonds === undefined ? undefined : Number(button.dataset.diamonds);
+    sendSimulation(kind, Number.isInteger(count) && count > 0 ? count : 1, diamonds);
   });
 }
+
+element<HTMLButtonElement>("resetLeaderboard").addEventListener("click", () => {
+  const sent = socket.send({ type: "admin:resetLeaderboard" });
+  if (sent) appendLog("top 3 de presentes zerado", "like");
+  else appendLog("sem conexão com o servidor; ranking não zerado", "error");
+});
 
 intervalRange.addEventListener("input", () => {
   intervalLabel.textContent = intervalRange.value;

@@ -5,7 +5,13 @@ import {
   type LiveEventKind,
   type LiveEventSource,
 } from "../shared/events.js";
-import { AUTO_INTERVAL_LIMITS, type ClientMessage, type ClientRole } from "../shared/protocol.js";
+import {
+  AUTO_INTERVAL_LIMITS,
+  DIAMONDS_LIMITS,
+  WAVE_LIMITS,
+  type ClientMessage,
+  type ClientRole,
+} from "../shared/protocol.js";
 
 /**
  * Validação de dados não confiáveis (eventos de conectores e mensagens de clientes).
@@ -74,7 +80,7 @@ export function parseLiveEvent(raw: unknown): Result<LiveEvent> {
   if (!timestamp.ok) return timestamp;
 
   const source = raw.source;
-  if (source !== "simulation" && source !== "tiktok") return fail("origem do evento inválida");
+  if (source !== "simulation" && source !== "tikfinity") return fail("origem do evento inválida");
   const base = {
     id: id.value,
     userId: userId.value,
@@ -119,10 +125,30 @@ export function parseClientMessage(raw: unknown): Result<ClientMessage> {
     }
     case "admin:simulate": {
       if (!isLiveEventKind(raw.kind)) return fail("tipo de evento desconhecido");
-      if (raw.count === undefined) return ok({ type: "admin:simulate", kind: raw.kind });
-      const count = readNumber(raw, "count", { min: 1, max: 20, integer: true }, "count");
-      if (!count.ok) return count;
-      return ok({ type: "admin:simulate", kind: raw.kind, count: count.value });
+      const message: { type: "admin:simulate"; kind: LiveEventKind; count?: number; diamonds?: number } = {
+        type: "admin:simulate",
+        kind: raw.kind,
+      };
+      if (raw.count !== undefined) {
+        const count = readNumber(raw, "count", { min: 1, max: 20, integer: true }, "count");
+        if (!count.ok) return count;
+        message.count = count.value;
+      }
+      if (raw.diamonds !== undefined) {
+        if (raw.kind !== "gift") return fail("diamonds só se aplica a presentes");
+        const diamonds = readNumber(raw, "diamonds", { ...DIAMONDS_LIMITS, integer: true }, "diamonds");
+        if (!diamonds.ok) return diamonds;
+        message.diamonds = diamonds.value;
+      }
+      return ok(message);
+    }
+    case "admin:resetLeaderboard": {
+      return ok({ type: "admin:resetLeaderboard" });
+    }
+    case "game:waveReached": {
+      const wave = readNumber(raw, "wave", { ...WAVE_LIMITS, integer: true }, "wave");
+      if (!wave.ok) return wave;
+      return ok({ type: "game:waveReached", wave: wave.value });
     }
     case "admin:auto": {
       if (typeof raw.enabled !== "boolean") return fail("enabled deve ser booleano");

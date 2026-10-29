@@ -1,16 +1,16 @@
 # LIVE SURVIVORS
 
-Jogo de sobrevivência 2D em visão de cima, feito para transmissões do **TikTok LIVE** e exibido pelo **OBS Studio**. Um personagem enfrenta ondas de monstros enquanto a audiência pode ajudar (curtidas curam, presentes ativam turbo) ou atrapalhar.
+Jogo de sobrevivência 2D em visão de cima, feito para transmissões automáticas no **TikTok LIVE Studio**. O personagem joga sozinho (piloto automático) enquanto a audiência interage: curtidas curam, comentários pontuam e **presentes ativam poderes**, mais fortes quanto mais caro o presente. O jogo reinicia sozinho após cada derrota e guarda o **recorde de ondas**.
 
-> **Estado atual:** protótipo jogável com **simulação local** de eventos. A integração com o TikTok LIVE real **ainda não foi implementada** (veja [Próximos passos](#próximos-passos-para-o-tiktok-live-real)).
+> **Estado atual:** o jogo lê eventos reais de uma live pelo **TikFinity** (WebSocket local) ou usa **simulação local**. A conexão foi escrita, mas **ainda não foi testada com uma live real**; veja [Verificação pendente](#verificação-pendente).
 
 ---
 
 ## Requisitos (Windows)
 
-- **Node.js 22 ou superior** (versão LTS). Baixe em https://nodejs.org. Confira no terminal com `node -v`.
-- **OBS Studio** (opcional, para a transmissão).
-- Um terminal: **PowerShell** ou **Prompt de Comando (cmd)**.
+- **Node.js 22 ou superior** (versão LTS). Baixe em https://nodejs.org. Confira com `node -v`.
+- **TikTok LIVE Studio** para a transmissão.
+- Um navegador **Google Chrome** ou **Microsoft Edge** (para exibir o jogo em janela própria).
 
 ## Instalação
 
@@ -25,23 +25,21 @@ npm install
 | Comando | O que faz |
 | --- | --- |
 | `npm install` | Instala as dependências (uma vez, ou após mudar o `package.json`). |
-| `npm start` | Gera o build do jogo e do servidor e inicia tudo em `http://127.0.0.1:3000`. Use este para transmitir. |
+| `npm start` | Gera o build e inicia o servidor em `http://127.0.0.1:3000`. Use este para transmitir. |
 | `npm test` | Roda os testes automatizados (Vitest). |
 | `npm run typecheck` | Verifica os tipos TypeScript sem gerar arquivos. |
 | `npm run build` | Gera o build do cliente (`dist/client`) e do servidor (`dist-server`). |
-| `npm run dev` | Servidor de desenvolvimento do Vite, com recarregamento automático, em `http://127.0.0.1:5173`. |
-| `npm run dev:server` | Compila e inicia o servidor local (porta 3000). Necessário junto com `npm run dev`. |
+| `npm run dev` | Servidor de desenvolvimento do Vite (recarrega sozinho), em `http://127.0.0.1:5173`. |
+| `npm run dev:server` | Compila e inicia o servidor local (porta 3000). Use junto com `npm run dev`. |
 
-### Rodar para jogar ou transmitir
+### Rodar para transmitir
 
 ```powershell
 npm start
 ```
 
-Depois abra no navegador:
-
 - **Jogo:** http://127.0.0.1:3000
-- **Painel de simulação:** http://127.0.0.1:3000/admin
+- **Painel de simulação:** http://127.0.0.1:3000/admin (use em outra janela, fora da transmissão)
 
 ### Rodar em modo de desenvolvimento
 
@@ -58,42 +56,98 @@ npm run dev
 - **Jogo:** http://127.0.0.1:5173
 - **Painel:** http://127.0.0.1:5173/admin.html
 
-### Executar os testes
+## Configuração no TikTok LIVE Studio
+
+O jogo é uma página web. Para aparecer na transmissão:
+
+1. Deixe o servidor rodando com `npm start`.
+2. Abra o jogo em uma janela própria do navegador, sem barra de endereço, com um destes comandos (ajuste o caminho se o navegador estiver em outra pasta):
+
+   ```powershell
+   # Google Chrome
+   & "C:\Program Files\Google\Chrome\Application\chrome.exe" --app=http://127.0.0.1:3000
+
+   # Microsoft Edge
+   & "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=http://127.0.0.1:3000
+   ```
+
+3. No **TikTok LIVE Studio**, adicione uma fonte de **captura de janela** (ou de jogo) e escolha essa janela. Confirme que a proporção fica vertical (720×1280) e que a tela aparece por completo.
+4. Abra o painel `/admin` em outra janela, para simular ou acompanhar eventos (ele não deve aparecer na transmissão).
+
+> **Atenção:** não confirmei se o TikTok LIVE Studio oferece fonte de "navegador" por URL. Por isso o passo 3 usa captura de janela. Teste a captura antes de transmitir ao público.
+
+## Ligação com o TikFinity
+
+O TikFinity recebe os eventos da live e os publica num WebSocket local. O jogo se conecta a esse WebSocket e lê:
+
+- **chat** → comentários (pontuam);
+- **like** → curtidas (curam);
+- **gift** → presentes (valem diamantes e ativam poderes).
+
+Eventos como `follow`, `share`, `roomUser` e `subscribe` são recebidos, mas não afetam o jogo.
+
+Passos:
+
+1. Abra o **TikFinity** e conecte-o à sua live (ou ao modo de teste dele).
+2. Confirme a porta do WebSocket local do TikFinity. O padrão é `21213`, o mesmo do exemplo fornecido.
+3. Inicie o jogo com o provedor do TikFinity.
 
 ```powershell
-npm test
+# PowerShell
+$env:LIVE_PROVIDER = "tikfinity"; npm start
 ```
 
-## Configuração no OBS Studio
+```bat
+:: Prompt de Comando (cmd)
+set LIVE_PROVIDER=tikfinity && npm start
+```
 
-1. Adicione uma fonte **Navegador** (Browser Source).
-2. URL: `http://127.0.0.1:3000`
-3. Largura: `720`, Altura: `1280` (composição vertical, 9:16).
-4. Mantenha o servidor rodando com `npm start` enquanto transmite.
-5. Para controlar a simulação durante a live, abra o painel `http://127.0.0.1:3000/admin` em uma janela separada do navegador (não dentro do OBS).
+4. Abra o painel `/admin`: o estado do provedor deve mostrar **conectado**. Se o TikFinity fechar ou ainda não estiver aberto, o jogo mostra a queda e tenta reconectar sozinho a cada poucos segundos.
 
-## Controles do jogo
+**Presentes em sequência** (combo) são somados e aparecem **uma única vez**, com o total de diamantes, quando a sequência termina. Se o fim não chegar, a sequência é concluída após 4 segundos sem novas mensagens.
 
-- **Mover:** `W A S D` ou as setas.
-- **Ataque:** automático, no inimigo mais próximo.
-- **Menu:** clique em **COMEÇAR** ou pressione `Enter`.
+Com `LIVE_PROVIDER=tikfinity`, o painel de simulação fica desativado.
 
-## Regras da partida
+## Como a partida funciona
 
-- Cada onda tem mais inimigos, mais vida e velocidade. A partida continua jogável nas ondas altas (há limites máximos).
-- **Curtidas:** são agregadas a cada 250 ms. A cada 20 curtidas, o personagem recupera 10 de vida. Cada curtida também soma pontos.
-- **Comentários:** somam 5 pontos e aparecem na tela.
-- **Presentes:** somam pontos (igual ao valor em diamantes) e ativam o **turbo** de ataque por 6 segundos.
-- Se a conexão com o servidor cair, a partida **continua**; o jogo só deixa de receber eventos da live.
+- **Automática:** o personagem se move sozinho (foge de inimigos muito próximos, circula os que estão no alcance de ataque e se afasta das bordas). Não há controles.
+- **Reinício automático:** ao perder, a tela mostra o resumo e a próxima partida começa em 6 segundos.
+- **Ondas:** cada onda tem mais inimigos, mais vida e velocidade. As ondas altas são limitadas para continuar jogáveis.
+- **Recorde:** a maior onda alcançada é guardada pelo servidor em `data/records.json` e aparece no topo da tela. Ao superar o recorde, aparece "NOVO RECORDE!".
 
-## Painel de simulação
+### Presentes e poderes
 
-No painel `/admin` você pode:
+O poder depende do **valor em diamantes**, não do nome do presente. Presentes mais caros ativam poderes mais fortes; cada presente ativa o seu poder de maior nível alcançado:
 
-- Enviar **curtidas**, **10 curtidas**, **comentários** e **presentes** fictícios.
-- Ligar o **modo automático**, que gera eventos aleatórios no intervalo escolhido (300 ms a 10 s).
+| Diamantes | Poder | Efeito |
+| --- | --- | --- |
+| 1 a 19 | **TURBO** | Ataque 60% mais rápido e dano maior por 6 s. |
+| 20 a 99 | **ESCUDO** | Invulnerável a dano por 5 s. |
+| 100 a 499 | **NOVA** | Explosão em volta do personagem: 4 de dano em todos os inimigos num raio de 260 px. |
+| 500 ou mais | **TEMPESTADE** | 6 de dano em **todos** os inimigos da tela, +25 de vida e turbo por 8 s. |
+
+Outras interações:
+
+- **Curtidas** são agregadas a cada 250 ms. A cada 20 curtidas o personagem recupera 10 de vida.
+- **Comentários** somam 5 pontos e aparecem no feed.
+- Os **presentes** aparecem no feed da tela (com cor pelo nível do poder) e somam pontos pelo valor em diamantes.
+- O **TOP 3 PRESENTES** (canto superior direito) mostra quem mais enviou diamantes desde que o servidor foi iniciado (ou desde que o ranking foi zerado no painel).
+- Se a conexão com o servidor cair, a partida **continua**; só deixam de chegar eventos da live.
+
+## Painel de simulação (`/admin`)
+
+- **Eventos:** curtida, 10 curtidas, comentário.
+- **Presentes por valor:** botões de 1, 20, 100 e 500 diamantes, um para cada poder.
+- **Modo automático:** gera eventos aleatórios no intervalo escolhido (300 ms a 10 s). Presentes baratos são mais comuns.
+- **Zerar top 3 de presentes:** limpa o ranking (útil ao começar uma nova live).
 
 Os eventos simulados passam pelas mesmas validações e limites de um conector real.
+
+## Recorde de ondas
+
+- O recorde fica em `data/records.json`, fora do código e ignorado pelo git.
+- Para **zerar o recorde**, pare o servidor (`Ctrl+C`), apague esse arquivo e inicie de novo.
+- O recorde é informado pela própria página do jogo, então vale a honra: o servidor só valida que a onda é um número entre 1 e 999.
 
 ## Configuração por variáveis de ambiente
 
@@ -103,8 +157,8 @@ Todas são opcionais.
 | --- | --- | --- |
 | `PORT` | `3000` | Porta do servidor (1 a 65535). |
 | `HOST` | `127.0.0.1` | Endereço de escuta. Veja o aviso de segurança abaixo. |
-| `LIVE_PROVIDER` | `simulation` | `simulation` (eventos fictícios) ou `tiktok` (ainda não implementado). |
-| `TIKTOK_USERNAME` | (vazio) | Nome de usuário da live, usado quando o conector real existir. |
+| `LIVE_PROVIDER` | `simulation` | `simulation` (eventos fictícios) ou `tikfinity` (eventos da live pelo TikFinity). |
+| `TIKFINITY_URL` | `ws://localhost:21213/` | WebSocket local do TikFinity. Só aceita `ws://` para `localhost`, `127.0.0.1` ou `[::1]`. |
 
 Exemplos no Windows:
 
@@ -120,9 +174,9 @@ set PORT=3001 && npm start
 
 ## Segurança
 
-- O servidor escuta apenas em `127.0.0.1` por padrão, ou seja, só o próprio computador acessa.
-- **O painel não tem autenticação.** Qualquer cliente que consiga abrir o WebSocket pode enviar comandos de simulação. Por isso **não altere `HOST` para `0.0.0.0`** sem antes adicionar controle de acesso.
-- Nenhum segredo, token ou credencial é usado ou enviado ao navegador. O jogo recebe apenas eventos já normalizados pelo servidor.
+- O servidor escuta apenas em `127.0.0.1` por padrão: só o próprio computador acessa.
+- **O painel não tem autenticação.** Qualquer cliente que consiga abrir o WebSocket pode enviar comandos de simulação e zerar o ranking. Por isso **não altere `HOST` para `0.0.0.0`** sem antes adicionar controle de acesso.
+- Nenhum segredo, token ou credencial é usado ou enviado ao navegador.
 - As mensagens são validadas no servidor (tipo, tamanho, intervalo e caracteres de controle). Eventos repetidos são descartados pelo identificador, e a frequência de comandos e de eventos é limitada por usuário e globalmente.
 
 ## Estrutura do projeto
@@ -131,44 +185,46 @@ set PORT=3001 && npm start
 src/
   shared/          Tipos de eventos e protocolo WebSocket (usados por servidor e cliente)
   server/          Servidor Node.js
-    live/          LiveProvider (interface), simulação e stub do conector TikTok
-    pipeline/      Validação, deduplicação, rate limit e agregação de curtidas
+    live/          LiveProvider (interface), simulação e conector TikFinity (WebSocket local)
+      tikfinity/   Tradução das mensagens do TikFinity e soma de presentes em sequência
+    pipeline/      Validação, deduplicação, rate limit, agregação de curtidas e ranking de presentes
+    records/       Recorde de ondas salvo em arquivo
     net/           Conexões WebSocket (papéis, comandos, heartbeat)
     http/          Arquivos estáticos (com proteção contra path traversal)
   game/            Jogo Phaser
-    core/          Regras puras (ondas, pontuação, dano, alvos): testáveis sem Phaser
-    entities/      Jogador, inimigos, projéteis
-    scenes/        Menu, arena, fim de jogo
-    ui/            HUD e botões
+    core/          Regras puras, testáveis sem Phaser: ondas, sessão, poderes, piloto automático
+    entities/      Personagem, inimigos, projéteis
+    scenes/        Arena e fim de jogo (com reinício automático)
+    ui/            HUD (vida, recorde, efeitos, top 3, feed de presentes)
     net/           Ligação do jogo ao servidor
-  client/net/     WebSocket com reconexão automática (usado pelo jogo e pelo painel)
+  client/net/      WebSocket com reconexão automática (usado pelo jogo e pelo painel)
   admin/           Painel de simulação
 tests/             Testes automatizados (Vitest) das regras principais
+data/              Recorde de ondas (gerado em tempo de execução)
 index.html         Página do jogo
 admin.html         Página do painel
 ```
 
 A fonte de eventos é uma interface (`LiveProvider`). Hoje existem duas implementações:
 
-1. **`SimulatedLiveProvider`**: eventos fictícios para testar o jogo sem uma live real.
-2. **`TikTokLiveProvider`**: ponto de encaixe para o conector real. Ainda não emite eventos.
+1. **`SimulatedLiveProvider`** (`LIVE_PROVIDER=simulation`): eventos fictícios para testar o jogo sem uma live real.
+2. **`TikFinityLiveProvider`** (`LIVE_PROVIDER=tikfinity`): lê o WebSocket local do TikFinity e entrega os eventos brutos ao mesmo pipeline de validação.
 
 ## Solução de problemas
 
 - **"Arquivo não encontrado. Execute 'npm run build'..."**: rode `npm run build` ou use `npm start`, que faz o build antes.
-- **"Live: sem conexão (o jogo continua)"**: o servidor não está rodando. Inicie com `npm start` ou `npm run dev:server`.
-- **Porta em uso** (`EADDRINUSE`): outro programa usa a porta. Troque com `PORT`, como no exemplo acima.
+- **"Live: sem conexão (o jogo continua)"**: o servidor não está rodando. Inicie com `npm start`.
+- **TikFinity "desconectado" no painel**: o TikFinity não está aberto, a live não está conectada nele, ou a porta de `TIKFINITY_URL` está errada.
+- **Porta em uso** (`EADDRINUSE`): outro programa usa a porta. Troque com `PORT`.
 - **`npm` não é reconhecido**: reinstale o Node.js e abra um novo terminal.
-- **Tela preta no OBS**: confirme que `npm start` está rodando e que a URL é `http://127.0.0.1:3000`. Em seguida, clique com o botão direito na fonte e escolha **Atualizar**.
+- **Tela preta na transmissão**: confirme que `npm start` está rodando e que a janela do navegador abriu em `http://127.0.0.1:3000`. Reabra a janela e atualize a fonte de captura no LIVE Studio.
 
-## Próximos passos para o TikTok LIVE real
+## Verificação pendente
 
-Antes de implementar, é preciso verificar com cuidado:
+Antes de usar em transmissão pública, confirme estes pontos. Nenhum deles foi testado com uma live real:
 
-1. **Documentação oficial do TikTok**: confirme se há uma API ou um evento oficial para receber curtidas, comentários e presentes de uma live por um aplicativo externo, e quais requisitos ela exige. Não presuma que esse acesso existe.
-2. **Bibliotecas não oficiais** (por exemplo, conectores que leem o chat da live): antes de usar, verifique a **licença**, os **termos de uso do TikTok**, a estabilidade (esse tipo de conector pode quebrar a qualquer mudança do TikTok) e se é compatível com Node.js 22.
-3. **Implementação**: criar uma classe que implementa `LiveProvider` em `src/server/live/TikTokLiveProvider.ts`, convertendo cada evento para o formato `LiveEvent` com um `id` estável (para a deduplicação funcionar). Os dados recebidos devem seguir pelo mesmo `EventPipeline`, sem atalhos.
-4. **Testes**: cobrir a conversão de eventos com exemplos gravados (fixtures), sem depender de uma live ao vivo.
-5. **Teste real**: começar com uma live de teste ou privada antes de transmitir ao público.
-
-Enquanto isso, use `LIVE_PROVIDER=simulation` (padrão).
+1. **Nomes dos campos do TikFinity**: a leitura usa `uniqueId`, `nickname`, `comment`, `likeCount`, `giftName`, `diamondCount`, `repeatCount`, `repeatEnd`, `giftType` e `msgId`, seguindo o TikTok-Live-Connector. Os testes usam exemplos montados à mão, não mensagens gravadas do TikFinity. Abra o exemplo do TikFinity (`index.html` + `script.js`) durante uma live e compare o formato real.
+2. **Presentes em sequência**: o jogo assume que `giftType === 1` marca presentes em sequência e que `repeatCount` é o total acumulado. Se o TikFinity enviar outro formato, a soma pode ficar errada.
+3. **Captura no LIVE Studio**: não confirmei se o TikTok LIVE Studio aceita fonte de navegador por URL. Por isso a instrução usa captura de janela.
+4. **Termos do TikFinity**: o TikFinity é uma ferramenta de terceiros. Confira os termos de uso e a licença dela antes de transmitir ao público.
+5. **Teste real**: comece com uma live privada ou de teste.

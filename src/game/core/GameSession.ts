@@ -1,5 +1,6 @@
 import type { LiveEvent } from "../../shared/events.js";
 import { LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
+import { powerForGift, type GiftPower } from "./powers.js";
 import { killPoints, waveConfig, type WaveConfig } from "./waves.js";
 
 export type SessionPhase = "playing" | "intermission" | "defeated";
@@ -11,18 +12,25 @@ export interface SessionStats {
   survivedMs: number;
 }
 
-/** Acontecimentos que a cena precisa tratar (criar inimigos, mostrar banners, encerrar a partida). */
+/** Acontecimentos que a cena precisa tratar (criar inimigos, mostrar banners, aplicar áreas, encerrar a partida). */
 export type SessionEvent =
   | { type: "spawn" }
   | { type: "waveStarted"; wave: number }
   | { type: "waveCleared"; wave: number }
   | { type: "playerHit"; damage: number; hp: number }
+  | { type: "power"; power: GiftPower }
   | { type: "defeated"; stats: SessionStats };
 
 /** Texto curto mostrado na tela em resposta a um evento da live. */
 export interface LiveFeedback {
   text: string;
-  tone: "score" | "heal" | "boost" | "chat";
+  tone: "score" | "heal" | "boost" | "chat" | "power";
+}
+
+/** Resultado de aplicar um evento da live: textos para a tela e acontecimentos para a cena. */
+export interface LiveOutcome {
+  feedback: LiveFeedback[];
+  events: SessionEvent[];
 }
 
 /**
@@ -41,7 +49,8 @@ export class GameSession {
   private spawnTimerMs = 0;
   private invulnerableMs = 0;
   private intermissionMs = 0;
-  private boostMs = 0;
+  private turboMs = 0;
+  private shieldMs = 0;
   private likeProgress = 0;
 
   get phase(): SessionPhase {
@@ -80,22 +89,33 @@ export class GameSession {
     return waveConfig(this.currentWave);
   }
 
-  get boostActive(): boolean {
-    return this.boostMs > 0;
+  get turboActive(): boolean {
+    return this.turboMs > 0;
+  }
+
+  get turboRemainingMs(): number {
+    return this.turboMs;
+  }
+
+  get shieldActive(): boolean {
+    return this.shieldMs > 0;
+  }
+
+  get shieldRemainingMs(): number {
+    return this.shieldMs;
   }
 
   get attackCooldownMs(): number {
-    return this.boostActive
-      ? PLAYER.attackCooldownMs / LIVE_EFFECTS.boostAttackSpeedMultiplier
-      : PLAYER.attackCooldownMs;
+    return this.turboActive ? PLAYER.attackCooldownMs / LIVE_EFFECTS.boostAttackSpeedMultiplier : PLAYER.attackCooldownMs;
   }
 
   get projectileDamage(): number {
-    return this.boostActive ? PLAYER.boostedProjectileDamage : PLAYER.projectileDamage;
+    return this.turboActive ? PLAYER.boostedProjectileDamage : PLAYER.projectileDamage;
   }
 
+  /** Verdadeiro durante a invulnerabilidade após um golpe ou com o escudo ativo. */
   get isInvulnerable(): boolean {
-    return this.invulnerableMs > 0;
+    return this.invulnerableMs > 0 || this.shieldMs > 0;
   }
 
   start(): SessionEvent[] {
@@ -109,7 +129,8 @@ export class GameSession {
     const events: SessionEvent[] = [];
     this.elapsedMs += dtMs;
     this.invulnerableMs = Math.max(0, this.invulnerableMs - dtMs);
-    this.boostMs = Math.max(0, this.boostMs - dtMs);
+    this.turboMs = Math.max(0, this.turboMs - dtMs);
+    this.shieldMs = Math.max(0, this.shieldMs - dtMs);
 
     if (this.currentPhase === "intermission") {
       this.intermissionMs -= dtMs;
@@ -149,7 +170,7 @@ export class GameSession {
 
   /** Aplica dano de contato. Há um período de invulnerabilidade após cada golpe. */
   damagePlayer(amount: number): SessionEvent[] {
-    if (this.currentPhase === "defeated" || this.invulnerableMs > 0 || amount <= 0) return [];
+    if (this.currentPhase === "defeated" || this.isInvulnerable || amount <= 0) return [];
 
     this.currentHp = Math.max(0, this.currentHp - amount);
     this.invulnerableMs = PLAYER.invulnerabilityMs;
@@ -167,12 +188,18 @@ export class GameSession {
     this.currentHp = Math.min(PLAYER.maxHp, this.currentHp + amount);
   }
 
-  activateBoost(durationMs: number): void {
-    this.boostMs = Math.max(this.boostMs, durationMs);
+  /** Ativa o turbo; se já estiver ativo, mantém o maior tempo restante. */
+  activateTurbo(durationMs: number): void {
+    this.turboMs = Math.max(this.turboMs, durationMs);
   }
 
-  /** Converte um evento da live em efeitos de jogo e retorna os textos para a tela. */
-  applyLiveEvent(event: LiveEvent): LiveFeedback[] {
+  /** Ativa o escudo; se já estiver ativo, mantém o maior tempo restante. */
+  activateShield(durationMs: number): void {
+    this.shieldMs = Math.max(this.shieldMs, durationMs);
+  }
+
+  /** Converte um evento da live em efeitos de jogo, textos para a tela e acontecimentos para a cena. */
+  applyLiveEvent(event: LiveEvent): LiveOutcome {
     switch (event.kind) {
       case "like": {
         this.likeProgress += event.count;
@@ -183,16 +210,25 @@ export class GameSession {
           this.heal(LIVE_EFFECTS.likeHealAmount);
           feedback.push({ text: `Cura +${LIVE_EFFECTS.likeHealAmount}`, tone: "heal" });
         }
-        return feedback;
+        return { feedback, events: [] };
       }
       case "comment": {
         this.currentScore += LIVE_EFFECTS.commentScore;
-        return [{ text: `${event.userName}: ${event.text}`, tone: "chat" }];
+        return { feedback: [{ text: `${event.userName}: ${event.text}`, tone: "chat" }], events: [] };
       }
       case "gift": {
         this.currentScore += event.diamonds;
-        this.activateBoost(LIVE_EFFECTS.giftBoostMs);
-        return [{ text: `${event.userName} enviou ${event.giftName}! Ataque turbo`, tone: "boost" }];
+        const feedback: LiveFeedback[] = [
+          { text: `${event.userName} enviou ${event.giftName} (${event.diamonds})`, tone: "boost" },
+        ];
+        const power = powerForGift(event.diamonds);
+        if (!power || this.currentPhase === "defeated") return { feedback, events: [] };
+
+        feedback.push({ text: `PODER ${power.label}`, tone: "power" });
+        if (power.turboMs > 0) this.activateTurbo(power.turboMs);
+        if (power.shieldMs > 0) this.activateShield(power.shieldMs);
+        this.heal(power.heal);
+        return { feedback, events: [{ type: "power", power }] };
       }
     }
   }

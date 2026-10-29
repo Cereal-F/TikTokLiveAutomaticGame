@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { createPixelTextures } from "../render/textures.js";
 import { SCENE_KEYS } from "./keys.js";
 
-/** Gera as texturas e segue para o menu. Não há arquivos de imagem para carregar. */
+/** Gera as texturas e começa a partida. Não há arquivos de imagem para carregar, nem menu: a live é automática. */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super(SCENE_KEYS.boot);
@@ -10,6 +10,6 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     createPixelTextures(this);
-    this.scene.start(SCENE_KEYS.menu);
+    this.scene.start(SCENE_KEYS.arena);
   }
 }

@@ -5,7 +5,7 @@
 
 export type LiveEventKind = "like" | "comment" | "gift";
 
-export type LiveEventSource = "simulation" | "tiktok";
+export type LiveEventSource = "simulation" | "tikfinity";
 
 interface LiveEventBase {
   /** Identificador único do evento (usado para deduplicação). */

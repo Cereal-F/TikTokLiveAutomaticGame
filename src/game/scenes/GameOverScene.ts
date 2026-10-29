@@ -1,27 +1,34 @@
 import Phaser from "phaser";
-import { WORLD } from "../core/constants.js";
-import type { SessionStats } from "../core/GameSession.js";
-import { createMenuButton } from "../ui/menuButton.js";
+import { RUN, WORLD } from "../core/constants.js";
 import { formatTime } from "../core/format.js";
+import type { SessionStats } from "../core/GameSession.js";
 import { SCENE_KEYS } from "./keys.js";
 
-const EMPTY_STATS: SessionStats = { wave: 1, score: 0, kills: 0, survivedMs: 0 };
+/** Dados da partida encerrada, recebidos da arena. */
+export interface GameOverData extends SessionStats {
+  /** Maior onda já alcançada (recorde) no momento do fim. */
+  bestWave: number;
+  /** Verdadeiro se esta partida superou o recorde anterior. */
+  newRecord: boolean;
+}
 
-/** Tela de derrota com o resumo da partida e a opção de jogar de novo. */
+const EMPTY_DATA: GameOverData = { wave: 1, score: 0, kills: 0, survivedMs: 0, bestWave: 0, newRecord: false };
+
+/** Resumo da partida. Não há botão: a próxima partida começa sozinha, pois a transmissão é automática. */
 export class GameOverScene extends Phaser.Scene {
-  private stats: SessionStats = EMPTY_STATS;
+  private data: GameOverData = EMPTY_DATA;
 
   constructor() {
     super(SCENE_KEYS.gameOver);
   }
 
-  init(data: SessionStats | undefined): void {
-    this.stats = data ?? EMPTY_STATS;
+  init(data: GameOverData | undefined): void {
+    this.data = data ?? EMPTY_DATA;
   }
 
   create(): void {
     const cx = WORLD.width / 2;
-    const stats = this.stats;
+    const data = this.data;
 
     this.add
       .text(cx, 300, "FIM DE JOGO", {
@@ -34,13 +41,13 @@ export class GameOverScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const lines = [
-      `Onda alcançada: ${stats.wave}`,
-      `Pontos: ${stats.score}`,
-      `Inimigos derrotados: ${stats.kills}`,
-      `Tempo sobrevivido: ${formatTime(stats.survivedMs)}`,
+      `Onda alcançada: ${data.wave}`,
+      `Pontos: ${data.score}`,
+      `Inimigos derrotados: ${data.kills}`,
+      `Tempo sobrevivido: ${formatTime(data.survivedMs)}`,
     ];
     this.add
-      .text(cx, 520, lines.join("\n"), {
+      .text(cx, 460, lines.join("\n"), {
         fontFamily: "monospace",
         fontSize: "34px",
         color: "#e8ecff",
@@ -49,11 +56,35 @@ export class GameOverScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    createMenuButton(this, cx, 860, "JOGAR NOVAMENTE", () => this.restart());
-    this.input.keyboard?.once("keydown-ENTER", () => this.restart());
-  }
+    const recordLine = data.newRecord ? `NOVO RECORDE: ONDA ${data.bestWave}!` : `Recorde: onda ${data.bestWave}`;
+    this.add
+      .text(cx, 720, recordLine, {
+        fontFamily: "monospace",
+        fontSize: "40px",
+        color: "#ffd23f",
+        stroke: "#000000",
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5);
 
-  private restart(): void {
-    this.scene.start(SCENE_KEYS.arena);
+    const countdown = this.add
+      .text(cx, 860, "", { fontFamily: "monospace", fontSize: "30px", color: "#8a93b8" })
+      .setOrigin(0.5);
+
+    let remaining = Math.ceil(RUN.restartDelayMs / 1000);
+    const show = (): void => countdown.setText(`Nova partida em ${remaining}s`);
+    show();
+    this.time.addEvent({
+      delay: 1_000,
+      repeat: remaining - 1,
+      callback: () => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          this.scene.start(SCENE_KEYS.arena);
+          return;
+        }
+        show();
+      },
+    });
   }
 }

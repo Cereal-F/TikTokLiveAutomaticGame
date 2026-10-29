@@ -109,6 +109,25 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage({ type: "admin:auto", enabled: "sim" }).ok).toBe(false);
   });
 
+  it("aceita presente com valor em diamantes e rejeita valor em outros tipos de evento", () => {
+    expect(parseClientMessage({ type: "admin:simulate", kind: "gift", diamonds: 500 }).ok).toBe(true);
+    expect(parseClientMessage({ type: "admin:simulate", kind: "gift", diamonds: -1 }).ok).toBe(false);
+    expect(parseClientMessage({ type: "admin:simulate", kind: "like", diamonds: 5 }).ok).toBe(false);
+  });
+
+  it("aceita o zerar do ranking, sem campos extras obrigatórios", () => {
+    expect(parseClientMessage({ type: "admin:resetLeaderboard" }).ok).toBe(true);
+  });
+
+  it("aceita a onda alcançada pelo jogo somente como inteiro entre 1 e 999", () => {
+    expect(parseClientMessage({ type: "game:waveReached", wave: 1 }).ok).toBe(true);
+    expect(parseClientMessage({ type: "game:waveReached", wave: 999 }).ok).toBe(true);
+    expect(parseClientMessage({ type: "game:waveReached", wave: 0 }).ok).toBe(false);
+    expect(parseClientMessage({ type: "game:waveReached", wave: 1000 }).ok).toBe(false);
+    expect(parseClientMessage({ type: "game:waveReached", wave: 2.5 }).ok).toBe(false);
+    expect(parseClientMessage({ type: "game:waveReached", wave: "7" }).ok).toBe(false);
+  });
+
   it("rejeita tipo de mensagem desconhecido e objetos fora do formato", () => {
     expect(parseClientMessage({ type: "shutdown" }).ok).toBe(false);
     expect(parseClientMessage(["hello"]).ok).toBe(false);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GameSession } from "../../src/game/core/GameSession.js";
 import { LIVE_EFFECTS, PLAYER, WAVES } from "../../src/game/core/constants.js";
+import { GIFT_POWERS } from "../../src/game/core/powers.js";
 import { commentEvent, giftEvent, likeEvent } from "../helpers/events.js";
 
 /** Inicia uma sessão e faz nascer todos os inimigos da onda 1 (6 inimigos). */
@@ -14,8 +15,7 @@ function sessionWithWaveOneSpawned(): GameSession {
 describe("GameSession: ondas", () => {
   it("começa na onda 1 com vida cheia e fase jogando", () => {
     const session = new GameSession();
-    const events = session.start();
-    expect(events).toEqual([{ type: "waveStarted", wave: 1 }]);
+    expect(session.start()).toEqual([{ type: "waveStarted", wave: 1 }]);
     expect(session.phase).toBe("playing");
     expect(session.wave).toBe(1);
     expect(session.hp).toBe(PLAYER.maxHp);
@@ -24,8 +24,7 @@ describe("GameSession: ondas", () => {
   it("faz nascer exatamente a quantidade de inimigos da onda, sem passar disso", () => {
     const session = new GameSession();
     session.start();
-    const events = session.update(10_000);
-    expect(events.filter((e) => e.type === "spawn")).toHaveLength(6);
+    expect(session.update(10_000).filter((e) => e.type === "spawn")).toHaveLength(6);
     expect(session.enemiesAlive).toBe(6);
     expect(session.update(10_000).filter((e) => e.type === "spawn")).toHaveLength(0);
   });
@@ -71,8 +70,7 @@ describe("GameSession: dano e derrota", () => {
   it("aplica dano e ativa invulnerabilidade temporária", () => {
     const session = new GameSession();
     session.start();
-    const events = session.damagePlayer(8);
-    expect(events).toEqual([{ type: "playerHit", damage: 8, hp: PLAYER.maxHp - 8 }]);
+    expect(session.damagePlayer(8)).toEqual([{ type: "playerHit", damage: 8, hp: PLAYER.maxHp - 8 }]);
     expect(session.isInvulnerable).toBe(true);
   });
 
@@ -122,20 +120,21 @@ describe("GameSession: dano e derrota", () => {
   });
 });
 
-describe("GameSession: eventos da live", () => {
+describe("GameSession: curtidas e comentários", () => {
   it("curtidas somam pontos e geram texto de feedback", () => {
     const session = new GameSession();
     session.start();
-    const feedback = session.applyLiveEvent(likeEvent("l1", "u1", 3));
+    const { feedback, events } = session.applyLiveEvent(likeEvent("l1", "u1", 3));
     expect(session.score).toBe(3);
     expect(feedback).toEqual([{ text: "+3 curtidas", tone: "score" }]);
+    expect(events).toEqual([]);
   });
 
   it("a cada 20 curtidas acumuladas cura 10 de vida", () => {
     const session = new GameSession();
     session.start();
     session.damagePlayer(50);
-    const feedback = session.applyLiveEvent(likeEvent("l1", "u1", LIVE_EFFECTS.likesPerHeal));
+    const { feedback } = session.applyLiveEvent(likeEvent("l1", "u1", LIVE_EFFECTS.likesPerHeal));
     expect(session.hp).toBe(50 + LIVE_EFFECTS.likeHealAmount);
     expect(feedback.map((f) => f.tone)).toEqual(["score", "heal"]);
   });
@@ -154,7 +153,7 @@ describe("GameSession: eventos da live", () => {
     const session = new GameSession();
     session.start();
     session.damagePlayer(80);
-    const feedback = session.applyLiveEvent(likeEvent("l1", "u1", 40));
+    const { feedback } = session.applyLiveEvent(likeEvent("l1", "u1", 40));
     expect(session.hp).toBe(20 + 2 * LIVE_EFFECTS.likeHealAmount);
     expect(feedback.filter((f) => f.tone === "heal")).toHaveLength(2);
   });
@@ -162,46 +161,120 @@ describe("GameSession: eventos da live", () => {
   it("comentários dão pontos e mostram o texto do espectador", () => {
     const session = new GameSession();
     session.start();
-    const feedback = session.applyLiveEvent(commentEvent("c1", "u1", "Vai!"));
+    const { feedback } = session.applyLiveEvent(commentEvent("c1", "u1", "Vai!"));
     expect(session.score).toBe(LIVE_EFFECTS.commentScore);
     expect(feedback).toEqual([{ text: "Nome u1: Vai!", tone: "chat" }]);
   });
+});
 
-  it("presentes ativam o turbo de ataque e dão pontos pelo valor em diamantes", () => {
+describe("GameSession: presentes e poderes", () => {
+  it("um presente barato ativa o turbo de ataque", () => {
     const session = new GameSession();
     session.start();
-    const feedback = session.applyLiveEvent(giftEvent("g1", "u1", "Leão", 99));
-    expect(session.score).toBe(99);
-    expect(session.boostActive).toBe(true);
-    expect(feedback[0]?.tone).toBe("boost");
+    const { feedback, events } = session.applyLiveEvent(giftEvent("g1", "u1", "Rosa", 1));
+    expect(session.score).toBe(1);
+    expect(session.turboActive).toBe(true);
+    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[0] }]);
+    expect(feedback.map((f) => f.tone)).toEqual(["boost", "power"]);
+  });
+
+  it("um presente de 20 diamantes ativa o escudo e o jogador fica invulnerável", () => {
+    const session = new GameSession();
+    session.start();
+    session.applyLiveEvent(giftEvent("g1", "u1", "Chapéu", 20));
+    expect(session.shieldActive).toBe(true);
+    expect(session.isInvulnerable).toBe(true);
+    expect(session.damagePlayer(8)).toEqual([]);
+    expect(session.hp).toBe(PLAYER.maxHp);
+  });
+
+  it("o escudo expira e o dano volta a valer", () => {
+    const session = new GameSession();
+    session.start();
+    session.applyLiveEvent(giftEvent("g1", "u1", "Chapéu", 20));
+    session.update(GIFT_POWERS[1]!.shieldMs);
+    expect(session.shieldActive).toBe(false);
+    expect(session.damagePlayer(8)).not.toEqual([]);
+  });
+
+  it("um presente de 100 diamantes gera uma explosão em área e não ativa turbo", () => {
+    const session = new GameSession();
+    session.start();
+    const { events } = session.applyLiveEvent(giftEvent("g1", "u1", "Leão", 100));
+    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[2] }]);
+    expect(session.turboActive).toBe(false);
+  });
+
+  it("um presente de 500 diamantes cura, ativa turbo e gera a tempestade", () => {
+    const session = new GameSession();
+    session.start();
+    session.damagePlayer(60);
+    const { events } = session.applyLiveEvent(giftEvent("g1", "u1", "Foguete", 500));
+    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[3] }]);
+    // 100 - 60 de dano + 25 de cura da tempestade = 65.
+    expect(session.hp).toBe(65);
+    expect(session.turboActive).toBe(true);
+  });
+
+  it("presentes mais caros têm efeitos mais fortes", () => {
+    const tiers = [...GIFT_POWERS];
+    for (let i = 1; i < tiers.length; i += 1) {
+      expect(tiers[i]!.minDiamonds).toBeGreaterThan(tiers[i - 1]!.minDiamonds);
+    }
+    expect(tiers[3]!.blastDamage).toBeGreaterThan(tiers[2]!.blastDamage);
+  });
+
+  it("presentes de valor zero não ativam poder algum", () => {
+    const session = new GameSession();
+    session.start();
+    const { events } = session.applyLiveEvent(giftEvent("g1", "u1", "Nada", 0));
+    expect(events).toEqual([]);
+    expect(session.turboActive).toBe(false);
+  });
+
+  it("o presente soma pontos pelo valor em diamantes", () => {
+    const session = new GameSession();
+    session.start();
+    session.applyLiveEvent(giftEvent("g1", "u1", "Leão", 100));
+    expect(session.score).toBe(100);
+  });
+
+  it("não aplica poderes depois da derrota", () => {
+    const session = new GameSession();
+    session.start();
+    session.damagePlayer(PLAYER.maxHp);
+    const { events } = session.applyLiveEvent(giftEvent("g1", "u1", "Foguete", 500));
+    expect(events).toEqual([]);
+    expect(session.turboActive).toBe(false);
   });
 });
 
-describe("GameSession: turbo de ataque", () => {
+describe("GameSession: turbo e escudo", () => {
   it("aumenta a cadência e o dano enquanto dura o turbo", () => {
     const session = new GameSession();
     session.start();
     const normalCooldown = session.attackCooldownMs;
-    session.activateBoost(LIVE_EFFECTS.giftBoostMs);
+    session.activateTurbo(6_000);
 
     expect(session.attackCooldownMs).toBeLessThan(normalCooldown);
     expect(session.projectileDamage).toBe(PLAYER.boostedProjectileDamage);
+    expect(session.turboRemainingMs).toBe(6_000);
 
-    session.update(LIVE_EFFECTS.giftBoostMs - 1);
-    expect(session.boostActive).toBe(true);
+    session.update(5_999);
+    expect(session.turboActive).toBe(true);
     session.update(1);
-    expect(session.boostActive).toBe(false);
+    expect(session.turboActive).toBe(false);
     expect(session.attackCooldownMs).toBe(normalCooldown);
     expect(session.projectileDamage).toBe(PLAYER.projectileDamage);
   });
 
-  it("um novo presente não reduz a duração de um turbo já ativo", () => {
+  it("um novo turbo não reduz a duração de um turbo já ativo", () => {
     const session = new GameSession();
     session.start();
-    session.activateBoost(10_000);
-    session.activateBoost(1_000);
+    session.activateTurbo(10_000);
+    session.activateTurbo(1_000);
     session.update(9_999);
-    expect(session.boostActive).toBe(true);
+    expect(session.turboActive).toBe(true);
   });
 });
 

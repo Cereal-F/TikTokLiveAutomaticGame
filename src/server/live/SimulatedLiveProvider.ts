@@ -10,11 +10,18 @@ export interface SimulatedProviderOptions {
 
 const SAMPLE_USERS = ["Ana", "Bruno", "Carla", "Diego", "Elisa", "Felipe", "Gabi", "Hugo", "Iris", "Julio"];
 const SAMPLE_COMMENTS = ["Vai!", "Que jogo!", "Mais monstros!", "Cuidado atrás de você", "GG", "Bora sobreviver"];
-const SAMPLE_GIFTS: { name: string; diamonds: number }[] = [
+
+/** Catálogo fictício de presentes, em ordem crescente de valor (um de cada faixa de poder). */
+export const SIMULATED_GIFTS: readonly { name: string; diamonds: number }[] = [
   { name: "Rosa", diamonds: 1 },
   { name: "Coração", diamonds: 5 },
-  { name: "Leão", diamonds: 99 },
+  { name: "Chapéu", diamonds: 20 },
+  { name: "Leão", diamonds: 100 },
+  { name: "Foguete", diamonds: 500 },
 ];
+
+/** Probabilidade acumulada de cada presente no modo automático: presentes baratos são mais comuns. */
+const AUTO_GIFT_CUMULATIVE = [0.5, 0.75, 0.9, 0.97, 1];
 
 /**
  * Gera eventos fictícios para testar o jogo sem uma live real.
@@ -63,11 +70,14 @@ export class SimulatedLiveProvider implements LiveProvider {
     return this.autoIntervalMs;
   }
 
-  /** Dispara `count` eventos do tipo indicado. Retorna false se o provedor não está iniciado. */
-  trigger(kind: LiveEventKind, count = 1): boolean {
+  /**
+   * Dispara `count` eventos do tipo indicado. Para presentes, `diamonds` escolhe a faixa
+   * (do catálogo, quando houver um presente com esse valor). Retorna false se não iniciado.
+   */
+  trigger(kind: LiveEventKind, count = 1, diamonds?: number): boolean {
     if (!this.sink) return false;
     for (let i = 0; i < count; i += 1) {
-      this.sink.onRawEvent(this.buildEvent(kind));
+      this.sink.onRawEvent(this.buildEvent(kind, diamonds));
     }
     return true;
   }
@@ -97,7 +107,7 @@ export class SimulatedLiveProvider implements LiveProvider {
     this.trigger(kind, 1);
   }
 
-  private buildEvent(kind: LiveEventKind): Record<string, unknown> {
+  private buildEvent(kind: LiveEventKind, diamonds?: number): Record<string, unknown> {
     this.sequence += 1;
     const userIndex = Math.floor(this.random() * SAMPLE_USERS.length);
     const userName = SAMPLE_USERS[userIndex] ?? "Espectador";
@@ -117,7 +127,17 @@ export class SimulatedLiveProvider implements LiveProvider {
       const text = SAMPLE_COMMENTS[Math.floor(this.random() * SAMPLE_COMMENTS.length)] ?? "Vai!";
       return { ...base, text };
     }
-    const gift = SAMPLE_GIFTS[Math.floor(this.random() * SAMPLE_GIFTS.length)] ?? SAMPLE_GIFTS[0]!;
+    const gift = diamonds === undefined ? this.randomGift() : this.giftWithValue(diamonds);
     return { ...base, giftName: gift.name, diamonds: gift.diamonds };
+  }
+
+  private randomGift(): { name: string; diamonds: number } {
+    const roll = this.random();
+    const index = AUTO_GIFT_CUMULATIVE.findIndex((limit) => roll < limit);
+    return SIMULATED_GIFTS[index === -1 ? SIMULATED_GIFTS.length - 1 : index] ?? SIMULATED_GIFTS[0]!;
+  }
+
+  private giftWithValue(diamonds: number): { name: string; diamonds: number } {
+    return SIMULATED_GIFTS.find((gift) => gift.diamonds === diamonds) ?? { name: `Presente ${diamonds}`, diamonds };
   }
 }
