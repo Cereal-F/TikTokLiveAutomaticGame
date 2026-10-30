@@ -150,6 +150,10 @@ export function parseClientMessage(raw: unknown): Result<ClientMessage> {
       if (!wave.ok) return wave;
       return ok({ type: "game:waveReached", wave: wave.value });
     }
+    case "game:runEnded": {
+      if (raw.outcome !== "victory" && raw.outcome !== "defeat") return fail("resultado da partida inválido");
+      return ok({ type: "game:runEnded", outcome: raw.outcome });
+    }
     case "admin:auto": {
       if (typeof raw.enabled !== "boolean") return fail("enabled deve ser booleano");
       if (raw.intervalMs === undefined) return ok({ type: "admin:auto", enabled: raw.enabled });

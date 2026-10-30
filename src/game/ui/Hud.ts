@@ -2,10 +2,10 @@ import type Phaser from "phaser";
 import type { ConnectionState } from "../../client/net/ReconnectingSocket.js";
 import type { LeaderboardEntry } from "../../shared/protocol.js";
 import type { LiveFeedback, SessionPhase } from "../core/GameSession.js";
-import { WORLD } from "../core/constants.js";
+import { CAMPAIGN, WORLD } from "../core/constants.js";
 import { formatTime } from "../core/format.js";
 import { GIFT_POWERS, giftTier, powerSummary } from "../core/powers.js";
-import { upcomingWaves } from "../core/waves.js";
+import { isFinalWave, upcomingWaves } from "../core/waves.js";
 
 const FONT = "monospace";
 const FEEDBACK_LIFETIME_MS = 6_000;
@@ -13,6 +13,13 @@ const MAX_FEEDBACK_LINES = 5;
 const MAX_GIFT_LINES = 4;
 const MAX_TEXT_CHARS = 40;
 const LEADER_NAME_CHARS = 11;
+
+/** Recorde e contadores da partida, guardados pelo servidor entre execuções. */
+export interface RecordView {
+  bestWave: number;
+  wins: number;
+  defeats: number;
+}
 
 /** Faixa de ondas: a atual e as próximas, lado a lado, no topo da tela. */
 const STRIP = { x: 24, y: 180, blockWidth: 128, blockHeight: 56, gap: 8, count: 5 } as const;
@@ -114,6 +121,7 @@ export class Hud {
   private readonly timeText: Phaser.GameObjects.Text;
   private readonly scoreText: Phaser.GameObjects.Text;
   private readonly recordText: Phaser.GameObjects.Text;
+  private readonly countersText: Phaser.GameObjects.Text;
   private readonly effectsText: Phaser.GameObjects.Text;
   private readonly connectionText: Phaser.GameObjects.Text;
   private readonly bannerText: Phaser.GameObjects.Text;
@@ -138,6 +146,10 @@ export class Hud {
     this.waveText = scene.add.text(WORLD.width / 2, 24, "", { ...label, fontSize: "34px" }).setOrigin(0.5, 0).setDepth(depth);
     this.timeText = scene.add.text(WORLD.width - 24, 24, "", label).setOrigin(1, 0).setDepth(depth);
     this.scoreText = scene.add.text(WORLD.width - 24, 60, "", { ...label, color: "#ffd23f" }).setOrigin(1, 0).setDepth(depth);
+    this.countersText = scene.add
+      .text(WORLD.width - 24, 124, "", { ...label, fontSize: "22px", color: "#e8ecff" })
+      .setOrigin(1, 0)
+      .setDepth(depth);
 
     this.buildWaveStrip(scene, depth);
     this.buildGiftLegend(scene, depth);
@@ -179,7 +191,7 @@ export class Hud {
     this.hpFill.width = this.hpMaxWidth * ratio;
     this.hpFill.fillColor = ratio > 0.35 ? 0x4ade80 : 0xf87171;
     this.hpText.setText(`VIDA ${Math.ceil(snapshot.hp)}/${snapshot.maxHp}`);
-    this.waveText.setText(`ONDA ${snapshot.wave}`);
+    this.waveText.setText(`FASE ${snapshot.wave}/${CAMPAIGN.levels}`);
     this.timeText.setText(`TEMPO ${formatTime(snapshot.survivedMs)}`);
     this.scoreText.setText(`PONTOS ${snapshot.score}`);
     this.effectsText.setText(effectsLabel(snapshot.turboRemainingMs, snapshot.shieldRemainingMs));
@@ -229,10 +241,18 @@ export class Hud {
       const block = this.waveBlocks[i];
       if (!block) return;
       const current = i === 0;
-      block.body.setFillStyle(current ? STRIP_COLORS.current : entry.isBoss ? STRIP_COLORS.boss : STRIP_COLORS.normal);
-      block.border.setVisible(entry.isBoss);
-      block.horns.setVisible(entry.isBoss);
-      block.label.setText(current ? `ONDA ${entry.wave}\nAGORA` : entry.isBoss ? `ONDA ${entry.wave}\nCHEFE` : `ONDA ${entry.wave}`);
+      // Ondas além da última fase não existem: o bloco fica apagado.
+      const beyondCampaign = entry.wave > CAMPAIGN.levels;
+      const showBoss = entry.isBoss && !beyondCampaign;
+      block.body.setFillStyle(current ? STRIP_COLORS.current : showBoss ? STRIP_COLORS.boss : STRIP_COLORS.normal);
+      block.body.setAlpha(beyondCampaign ? 0.25 : 1);
+      block.border.setVisible(showBoss);
+      block.horns.setVisible(showBoss);
+      let text = `ONDA ${entry.wave}`;
+      if (beyondCampaign) text = "";
+      else if (current) text = `ONDA ${entry.wave}\nAGORA`;
+      else if (showBoss) text = `ONDA ${entry.wave}\n${isFinalWave(entry.wave) ? "CHEFE FINAL" : "CHEFE"}`;
+      block.label.setText(text);
       block.label.setColor(current ? "#0b0b12" : "#e8ecff");
     });
   }
@@ -265,9 +285,10 @@ export class Hud {
     });
   }
 
-  /** Mostra o recorde de ondas guardado pelo servidor (null = ainda não carregado). */
-  setRecord(bestWave: number | null): void {
-    this.recordText.setText(bestWave === null ? "" : `RECORDE: ONDA ${bestWave}`);
+  /** Mostra o recorde e os contadores de vitórias e derrotas (null = ainda não carregado). */
+  setRecord(record: RecordView | null): void {
+    this.recordText.setText(record === null ? "" : `RECORDE: FASE ${record.bestWave}/${CAMPAIGN.levels}`);
+    this.countersText.setText(record === null ? "" : `VITÓRIAS ${record.wins}   DERROTAS ${record.defeats}`);
   }
 
   setLeaderboard(entries: LeaderboardEntry[]): void {

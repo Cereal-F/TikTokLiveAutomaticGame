@@ -14,11 +14,16 @@ export interface ProviderStatus {
   detail?: string;
 }
 
-/** Maior onda já alcançada, guardada pelo servidor entre execuções. */
+/** Resultado de uma partida: vitória (chefe final derrotado) ou derrota (vida zerada). */
+export type RunOutcome = "victory" | "defeat";
+
+/** Recorde e contadores guardados pelo servidor entre execuções. */
 export interface RecordSnapshot {
   bestWave: number;
   /** Instante (ISO 8601) em que o recorde foi alcançado, ou null se ainda não há recorde. */
   achievedAt: string | null;
+  wins: number;
+  defeats: number;
 }
 
 /** Uma linha do ranking de presentes da live (sem identificadores internos). */
@@ -33,7 +38,8 @@ export type ClientMessage =
   | { type: "admin:simulate"; kind: LiveEventKind; count?: number; diamonds?: number }
   | { type: "admin:auto"; enabled: boolean; intervalMs?: number }
   | { type: "admin:resetLeaderboard" }
-  | { type: "game:waveReached"; wave: number };
+  | { type: "game:waveReached"; wave: number }
+  | { type: "game:runEnded"; outcome: RunOutcome };
 
 /** Mensagens enviadas pelo servidor aos clientes. */
 export type ServerMessage =

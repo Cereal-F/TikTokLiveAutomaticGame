@@ -32,7 +32,7 @@ describe("powerSummary", () => {
   it("descreve cada poder com o efeito principal", () => {
     expect(powerSummary(GIFT_POWERS[0]!)).toContain("ataque");
     expect(powerSummary(GIFT_POWERS[1]!)).toContain("invulnerável");
-    expect(powerSummary(GIFT_POWERS[2]!)).toContain("dano 4");
-    expect(powerSummary(GIFT_POWERS[3]!)).toContain("+25 vida");
+    expect(powerSummary(GIFT_POWERS[2]!)).toContain("dano 14");
+    expect(powerSummary(GIFT_POWERS[3]!)).toContain("+30 vida");
   });
 });

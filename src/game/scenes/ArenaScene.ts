@@ -1,18 +1,21 @@
 import Phaser from "phaser";
 import type { ConnectionState } from "../../client/net/ReconnectingSocket.js";
 import type { LiveEvent } from "../../shared/events.js";
+import type { RunOutcome } from "../../shared/protocol.js";
 import { Autopilot } from "../core/autopilot.js";
-import { ENEMY, PLAYER, PROJECTILE, SPEED, WORLD } from "../core/constants.js";
+import { PLAYER, PROJECTILE, SHOT, SPEED, WORLD } from "../core/constants.js";
 import { GameSession, type SessionEvent, type SessionStats } from "../core/GameSession.js";
-import { giftTier, powerForGift, type GiftPower } from "../core/powers.js";
+import { powerForGift, giftTier, type GiftPower } from "../core/powers.js";
 import { edgeSpawnPoint } from "../core/spawnPoints.js";
 import { distance, directionTo, findNearest, type Point } from "../core/targeting.js";
-import { isBossWave } from "../core/waves.js";
-import { Enemy, type EnemySpec } from "../entities/Enemy.js";
+import type { Volley } from "../core/enemyBehavior.js";
+import { commonBodyFor, isBossWave, type BossConfig, type EnemyKind, type WaveConfig } from "../core/waves.js";
+import { Enemy, type EnemyBrainSpec, type EnemySpec } from "../entities/Enemy.js";
+import { EnemyShot } from "../entities/EnemyShot.js";
 import { Player } from "../entities/Player.js";
 import { Projectile } from "../entities/Projectile.js";
 import { LiveFeed } from "../net/LiveFeed.js";
-import { Hud } from "../ui/Hud.js";
+import { Hud, type RecordView } from "../ui/Hud.js";
 import { SCENE_KEYS } from "./keys.js";
 import type { GameOverData } from "./GameOverScene.js";
 
@@ -29,13 +32,18 @@ export class ArenaScene extends Phaser.Scene {
   private autopilot = new Autopilot();
   private player!: Player;
   private enemies: Enemy[] = [];
+  private enemyShots: EnemyShot[] = [];
   private projectiles: Projectile[] = [];
   private hud!: Hud;
-  private liveFeed!: LiveFeed;
+  /** Criado uma vez: a fila de resultados que ainda não chegaram ao servidor sobrevive entre partidas. */
+  private liveFeed: LiveFeed | null = null;
+  private hudAlive = false;
   private attackCooldownMs = 0;
   private ended = false;
-  /** Maior onda conhecida (vinda do servidor ou desta execução). Persiste entre partidas. */
-  private bestWave = 0;
+  /** Recorde e contadores vindos do servidor (e atualizados localmente ao fim de cada partida). */
+  private record: RecordView = { bestWave: 0, wins: 0, defeats: 0 };
+  /** Falso até o servidor enviar o primeiro recorde; a HUD mostra traços até lá. */
+  private recordLoaded = false;
   private recordBeatenThisRun = false;
 
   constructor() {
@@ -46,6 +54,7 @@ export class ArenaScene extends Phaser.Scene {
     this.session = new GameSession();
     this.autopilot = new Autopilot();
     this.enemies = [];
+    this.enemyShots = [];
     this.projectiles = [];
     this.attackCooldownMs = 0;
     this.ended = false;
@@ -58,18 +67,18 @@ export class ArenaScene extends Phaser.Scene {
     this.add.tileSprite(0, 0, WORLD.width, WORLD.height, "floor").setOrigin(0).setDepth(0);
     this.player = new Player(this, WORLD.width / 2, WORLD.height / 2);
     this.hud = new Hud(this);
-    this.hud.setRecord(this.bestWave > 0 ? this.bestWave : null);
+    this.showRecord();
 
     // Ao encerrar a cena (reinício automático), a conexão é fechada e não deve mais
     // atualizar a HUD, cujos objetos podem já estar sendo destruídos.
-    let sceneActive = true;
-    this.liveFeed = new LiveFeed((state: ConnectionState) => {
-      if (sceneActive) this.hud.setConnection(state);
+    this.hudAlive = true;
+    this.liveFeed ??= new LiveFeed((state: ConnectionState) => {
+      if (this.hudAlive) this.hud.setConnection(state);
     });
     this.liveFeed.start();
     this.events.once("shutdown", () => {
-      sceneActive = false;
-      this.liveFeed.stop();
+      this.hudAlive = false;
+      this.liveFeed?.stop();
     });
 
     this.handleSessionEvents(this.session.start());
@@ -81,7 +90,7 @@ export class ArenaScene extends Phaser.Scene {
     const dt = Math.min(deltaMs, 100) * SPEED.timeScale;
 
     this.applyServerUpdates();
-    for (const event of this.liveFeed.drain()) {
+    for (const event of this.liveFeed?.drain() ?? []) {
       this.handleLiveEvent(event);
     }
 
@@ -93,11 +102,13 @@ export class ArenaScene extends Phaser.Scene {
       enemies: this.aliveEnemies().map((enemy) => enemy.position),
       world: WORLD,
     });
-    // Arrancadas curtas (dash) quebram a órbita constante em torno dos inimigos.
-    this.player.move(direction, dt * this.autopilot.dashMultiplier(dt));
+    // A arrancada (dash) aumenta a velocidade máxima; a aceleração suave continua valendo.
+    this.player.move(direction, dt, this.autopilot.dashMultiplier(dt));
     this.updateAttack(dt);
     this.updateProjectiles(dt);
     this.updateEnemies(dt);
+    if (this.ended) return;
+    this.updateEnemyShots(dt);
     if (this.ended) return;
 
     this.hud.update({
@@ -113,12 +124,22 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private applyServerUpdates(): void {
-    const updates = this.liveFeed.takeUpdates();
+    const updates = this.liveFeed?.takeUpdates();
+    if (!updates) return;
     if (updates.leaderboard) this.hud.setLeaderboard(updates.leaderboard);
     if (updates.record) {
-      this.bestWave = Math.max(this.bestWave, updates.record.bestWave);
-      this.hud.setRecord(this.bestWave);
+      this.recordLoaded = true;
+      this.record = {
+        bestWave: Math.max(this.record.bestWave, updates.record.bestWave),
+        wins: updates.record.wins,
+        defeats: updates.record.defeats,
+      };
+      this.showRecord();
     }
+  }
+
+  private showRecord(): void {
+    this.hud.setRecord(this.recordLoaded ? { ...this.record } : null);
   }
 
   private handleLiveEvent(event: LiveEvent): void {
@@ -154,24 +175,28 @@ export class ArenaScene extends Phaser.Scene {
         case "power":
           this.activatePower(event.power);
           break;
+        case "victory":
+          this.endRun(event.stats, "victory");
+          return;
         case "defeated":
-          this.endRun(event.stats);
+          this.endRun(event.stats, "defeat");
           return;
       }
     }
   }
 
   private onWaveStarted(wave: number): void {
-    this.hud.showBanner(isBossWave(wave) ? `CHEFE! ONDA ${wave}` : `ONDA ${wave}`);
-    this.liveFeed.reportWave(wave);
-    if (wave > this.bestWave) {
+    const config = this.session.waveSettings;
+    this.hud.showBanner(waveBanner(wave, config));
+    this.liveFeed?.reportWave(wave);
+    if (wave > this.record.bestWave) {
       // Só comemora quando há um recorde anterior para superar (evita banner na primeira execução).
-      if (this.bestWave > 0 && !this.recordBeatenThisRun) {
+      if (this.record.bestWave > 0 && !this.recordBeatenThisRun) {
         this.recordBeatenThisRun = true;
         this.hud.showBanner("NOVO RECORDE!");
       }
-      this.bestWave = wave;
-      this.hud.setRecord(this.bestWave);
+      this.record = { ...this.record, bestWave: wave };
+      this.showRecord();
     }
   }
 
@@ -200,22 +225,7 @@ export class ArenaScene extends Phaser.Scene {
   private spawnEnemy(boss: boolean): void {
     const config = this.session.waveSettings;
     const point = edgeSpawnPoint(() => Math.random(), WORLD);
-    const spec: EnemySpec =
-      boss && config.boss
-        ? {
-            hp: config.boss.hp,
-            speed: config.boss.speed,
-            radius: config.boss.radius,
-            contactDamage: config.boss.contactDamage,
-            isBoss: true,
-          }
-        : {
-            hp: config.enemyHp,
-            speed: config.enemySpeed,
-            radius: ENEMY.radius,
-            contactDamage: ENEMY.contactDamage,
-            isBoss: false,
-          };
+    const spec = boss && config.boss ? bossSpec(config.boss) : commonSpec(config);
     this.enemies.push(new Enemy(this, point.x, point.y, spec));
   }
 
@@ -264,7 +274,8 @@ export class ArenaScene extends Phaser.Scene {
     // Posições de todos os vivos, para a separação; cada inimigo ignora a própria posição.
     const positions = alive.map((enemy) => enemy.position);
     for (const enemy of alive) {
-      enemy.chase(playerPosition, positions, dt);
+      const volleys = enemy.act(playerPosition, positions, dt);
+      for (const volley of volleys) this.fireVolley(enemy.position, volley);
       if (distance(enemy.position, playerPosition) < enemy.radius + PLAYER.radius) {
         this.handleSessionEvents(this.session.damagePlayer(enemy.contactDamage));
         if (this.ended) return;
@@ -273,13 +284,94 @@ export class ArenaScene extends Phaser.Scene {
     this.enemies = this.aliveEnemies();
   }
 
-  private endRun(stats: SessionStats): void {
+  private fireVolley(origin: Point, volley: Volley): void {
+    for (const direction of volley.directions) {
+      this.enemyShots.push(new EnemyShot(this, origin, direction, volley.speed, volley.damage));
+    }
+  }
+
+  /** Tiros inimigos: avançam em linha reta e causam dano ao personagem se o acertarem. */
+  private updateEnemyShots(dt: number): void {
+    const remaining: EnemyShot[] = [];
+    for (const shot of this.enemyShots) {
+      if (!shot.advance(dt)) {
+        shot.destroy();
+        continue;
+      }
+      if (distance(shot.position, this.player.position) < SHOT.radius + PLAYER.radius) {
+        shot.destroy();
+        this.handleSessionEvents(this.session.damagePlayer(shot.damage));
+        if (this.ended) return;
+        continue;
+      }
+      remaining.push(shot);
+    }
+    this.enemyShots = remaining;
+  }
+
+  private endRun(stats: SessionStats, outcome: RunOutcome): void {
     this.ended = true;
+    this.record = {
+      ...this.record,
+      wins: this.record.wins + (outcome === "victory" ? 1 : 0),
+      defeats: this.record.defeats + (outcome === "defeat" ? 1 : 0),
+    };
+    // Envia o resultado ao servidor antes do reinício; se a conexão estiver fora, fica na fila.
+    this.liveFeed?.reportRunEnded(outcome);
     const data: GameOverData = {
       ...stats,
-      bestWave: this.bestWave,
+      outcome,
+      wins: this.record.wins,
+      defeats: this.record.defeats,
+      bestWave: this.record.bestWave,
       newRecord: this.recordBeatenThisRun,
     };
     this.scene.start(SCENE_KEYS.gameOver, data);
+  }
+}
+
+/** Banner de entrada de cada onda: chefe com nome próprio, chefe final e ondas comuns. */
+function waveBanner(wave: number, config: WaveConfig): string {
+  if (config.isFinal) return "CHEFE FINAL!";
+  if (isBossWave(wave) && config.boss) return `CHEFE: ${config.boss.design.name}`;
+  return `ONDA ${wave}`;
+}
+
+/** Inimigo comum: corpo e comportamento conforme o tipo da onda. */
+function commonSpec(config: WaveConfig): EnemySpec {
+  const body = commonBodyFor(config.kind);
+  return {
+    hp: config.enemyHp,
+    speed: config.enemySpeed,
+    radius: body.radius,
+    contactDamage: body.contactDamage,
+    isBoss: false,
+    texture: body.texture,
+    brain: brainFor(config.kind),
+  };
+}
+
+/** Chefe: atributos e padrões de ataque do desenho dele. */
+function bossSpec(boss: BossConfig): EnemySpec {
+  return {
+    hp: boss.hp,
+    speed: boss.speed,
+    radius: boss.radius,
+    contactDamage: boss.contactDamage,
+    isBoss: true,
+    texture: boss.design.texture,
+    brain: { kind: "boss", design: boss.design },
+  };
+}
+
+function brainFor(kind: EnemyKind): EnemyBrainSpec {
+  switch (kind) {
+    case "shooter":
+      return { kind: "shooter" };
+    case "charger":
+      return { kind: "charger" };
+    case "virus":
+    case "tank":
+      return { kind: "chase" };
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BOSS, WAVES } from "../../src/game/core/constants.js";
-import { bossConfig, isBossWave, killPoints, upcomingWaves, waveConfig } from "../../src/game/core/waves.js";
+import { WAVES } from "../../src/game/core/constants.js";
+import { bossConfig, commonBodyFor, isBossWave, killPoints, upcomingWaves, waveConfig } from "../../src/game/core/waves.js";
 
 describe("waveConfig", () => {
   it("usa valores iniciais na onda 1, sem chefe", () => {
@@ -10,7 +10,9 @@ describe("waveConfig", () => {
       spawnIntervalMs: 700,
       enemyHp: 3,
       enemySpeed: 96,
+      kind: "virus",
       isBoss: false,
+      isFinal: false,
       boss: null,
     });
   });
@@ -29,22 +31,33 @@ describe("waveConfig", () => {
     const late = waveConfig(101);
     expect(late.enemyCount).toBe(WAVES.maxEnemiesPerWave);
     expect(late.spawnIntervalMs).toBe(WAVES.minSpawnIntervalMs);
-    expect(late.enemyHp).toBe(40);
-    expect(late.enemySpeed).toBe(260);
+    // Vida base no teto (40) multiplicada pelo fator do último tipo (ouriço, 2.2).
+    expect(late.enemyHp).toBe(88);
+    expect(late.enemySpeed).toBe(156);
 
     const bossWave = waveConfig(100);
     expect(bossWave.isBoss).toBe(true);
     expect(bossWave.enemyCount).toBeLessThanOrEqual(WAVES.maxEnemiesPerWave);
   });
 
-  it("nunca diminui a dificuldade de uma onda para a seguinte", () => {
+  it("nunca diminui a quantidade nem o ritmo de uma onda para a seguinte", () => {
     for (let wave = 1; wave < 100; wave += 1) {
       const current = waveConfig(wave);
       const next = waveConfig(wave + 1);
+      expect(next.spawnIntervalMs).toBeLessThanOrEqual(current.spawnIntervalMs);
+      // Na troca de tipo (ondas 6, 11 e 16) a escolta pode diminuir: o atirador tem teto por onda.
+      if (current.kind !== next.kind) continue;
       expect(next.enemyCount).toBeGreaterThanOrEqual(current.enemyCount);
+    }
+  });
+
+  it("dentro de um mesmo capítulo a vida e a velocidade só sobem", () => {
+    for (let wave = 1; wave < 20; wave += 1) {
+      const current = waveConfig(wave);
+      const next = waveConfig(wave + 1);
+      if (current.kind !== next.kind) continue;
       expect(next.enemyHp).toBeGreaterThanOrEqual(current.enemyHp);
       expect(next.enemySpeed).toBeGreaterThanOrEqual(current.enemySpeed);
-      expect(next.spawnIntervalMs).toBeLessThanOrEqual(current.spawnIntervalMs);
     }
   });
 });
@@ -67,13 +80,25 @@ describe("chefes", () => {
     expect(boss.enemyCount).toBeGreaterThan(normal.enemyCount);
   });
 
-  it("o chefe fica mais forte a cada chefe", () => {
-    const first = bossConfig(5);
-    const second = bossConfig(10);
-    expect(first.hp).toBe(BOSS.hpBase);
-    expect(second.hp).toBe(BOSS.hpBase + BOSS.hpPerBoss);
-    expect(second.speed).toBeGreaterThanOrEqual(first.speed);
-    expect(second.speed).toBeLessThanOrEqual(BOSS.speedMax);
+  it("cada chefe tem desenho próprio, e o último é o chefe final coroado", () => {
+    const designs = [5, 10, 15, 20].map((wave) => bossConfig(wave).design.texture);
+    expect(new Set(designs).size).toBe(4);
+    expect(designs[3]).toBe("bossFinal");
+    expect(bossConfig(20).design.name).toBe("REI COROADO");
+    expect(bossConfig(5).hp).toBeLessThan(bossConfig(20).hp);
+  });
+
+  it("a fase final é a última da campanha", () => {
+    expect(waveConfig(19).isFinal).toBe(false);
+    expect(waveConfig(20).isFinal).toBe(true);
+    expect(waveConfig(20).isBoss).toBe(true);
+  });
+
+  it("os tipos de inimigo trocam nas ondas 6, 11 e 16", () => {
+    expect(waveConfig(5).kind).toBe("virus");
+    expect(waveConfig(6).kind).toBe("shooter");
+    expect(waveConfig(11).kind).toBe("charger");
+    expect(waveConfig(16).kind).toBe("tank");
   });
 
   it("o chefe é mais forte que um inimigo comum, mas ainda pode ser derrotado", () => {
@@ -81,6 +106,18 @@ describe("chefes", () => {
     expect(boss.hp).toBeGreaterThan(waveConfig(5).enemyHp);
     expect(boss.contactDamage).toBeGreaterThan(8);
     expect(boss.speed).toBeLessThan(waveConfig(5).enemySpeed);
+  });
+});
+
+describe("commonBodyFor", () => {
+  it("cada tipo de inimigo comum tem textura própria", () => {
+    const textures = (["virus", "shooter", "charger", "tank"] as const).map((kind) => commonBodyFor(kind).texture);
+    expect(new Set(textures).size).toBe(4);
+  });
+
+  it("o ouriço é o maior e o que mais machuca por contato entre os tipos comuns", () => {
+    expect(commonBodyFor("tank").radius).toBeGreaterThan(commonBodyFor("virus").radius);
+    expect(commonBodyFor("tank").contactDamage).toBeGreaterThan(commonBodyFor("virus").contactDamage);
   });
 });
 

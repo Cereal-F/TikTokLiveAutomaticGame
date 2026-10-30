@@ -3,7 +3,7 @@ import { BOSS, LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
 import { powerForGift, type GiftPower } from "./powers.js";
 import { killPoints, waveConfig, type WaveConfig } from "./waves.js";
 
-export type SessionPhase = "playing" | "intermission" | "defeated";
+export type SessionPhase = "playing" | "intermission" | "defeated" | "victory";
 
 export interface SessionStats {
   wave: number;
@@ -20,7 +20,8 @@ export type SessionEvent =
   | { type: "waveCleared"; wave: number }
   | { type: "playerHit"; damage: number; hp: number }
   | { type: "power"; power: GiftPower }
-  | { type: "defeated"; stats: SessionStats };
+  | { type: "defeated"; stats: SessionStats }
+  | { type: "victory"; stats: SessionStats };
 
 /** Texto curto mostrado na tela em resposta a um evento da live. */
 export interface LiveFeedback {
@@ -56,6 +57,11 @@ export class GameSession {
 
   get phase(): SessionPhase {
     return this.currentPhase;
+  }
+
+  /** Verdadeiro depois da derrota ou da vitória: a partida não aceita mais efeitos. */
+  get isOver(): boolean {
+    return this.currentPhase === "defeated" || this.currentPhase === "victory";
   }
 
   get hp(): number {
@@ -125,7 +131,7 @@ export class GameSession {
 
   /** Avança o tempo da partida. Retorna os acontecimentos ocorridos neste intervalo. */
   update(dtMs: number): SessionEvent[] {
-    if (this.currentPhase === "defeated" || dtMs <= 0) return [];
+    if (this.isOver || dtMs <= 0) return [];
 
     const events: SessionEvent[] = [];
     this.elapsedMs += dtMs;
@@ -161,7 +167,13 @@ export class GameSession {
     this.currentKills += 1;
     this.currentScore += isBoss ? killPoints(this.currentWave) * BOSS.pointsMultiplier : killPoints(this.currentWave);
 
-    if (this.killedInWave >= waveConfig(this.currentWave).enemyCount) {
+    const config = waveConfig(this.currentWave);
+    if (this.killedInWave >= config.enemyCount && config.isFinal) {
+      // Derrotar o chefe final vence a campanha.
+      this.currentPhase = "victory";
+      return [{ type: "victory", stats: this.stats() }];
+    }
+    if (this.killedInWave >= config.enemyCount) {
       this.currentPhase = "intermission";
       this.intermissionMs = WAVES.intermissionMs;
       return [{ type: "waveCleared", wave: this.currentWave }];
@@ -171,7 +183,7 @@ export class GameSession {
 
   /** Aplica dano de contato. Há um período de invulnerabilidade após cada golpe. */
   damagePlayer(amount: number): SessionEvent[] {
-    if (this.currentPhase === "defeated" || this.isInvulnerable || amount <= 0) return [];
+    if (this.isOver || this.isInvulnerable || amount <= 0) return [];
 
     this.currentHp = Math.max(0, this.currentHp - amount);
     this.invulnerableMs = PLAYER.invulnerabilityMs;
@@ -185,7 +197,7 @@ export class GameSession {
   }
 
   heal(amount: number): void {
-    if (this.currentPhase === "defeated" || amount <= 0) return;
+    if (this.isOver || amount <= 0) return;
     this.currentHp = Math.min(PLAYER.maxHp, this.currentHp + amount);
   }
 
@@ -223,7 +235,7 @@ export class GameSession {
           { text: `${event.userName} enviou ${event.giftName} (${event.diamonds})`, tone: "boost" },
         ];
         const power = powerForGift(event.diamonds);
-        if (!power || this.currentPhase === "defeated") return { feedback, events: [] };
+        if (!power || this.isOver) return { feedback, events: [] };
 
         feedback.push({ text: `PODER ${power.label}`, tone: "power" });
         if (power.turboMs > 0) this.activateTurbo(power.turboMs);
