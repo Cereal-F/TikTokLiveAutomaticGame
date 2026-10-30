@@ -1,6 +1,7 @@
 import type { LiveEvent } from "../../shared/events.js";
-import { BOSS, LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
-import { powerForGift, type GiftPower } from "./powers.js";
+import { BERSERK, BOSS, EFFECT_CAP_MS, LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
+import { effectText, giftTier, grantFor, HITKILL_DAMAGE, powerForGift, type GiftPower } from "./powers.js";
+import { likeTitle, type Spotlight } from "./spotlight.js";
 import { killPoints, waveConfig, type WaveConfig } from "./waves.js";
 
 export type SessionPhase = "playing" | "intermission" | "defeated" | "victory";
@@ -19,7 +20,8 @@ export type SessionEvent =
   | { type: "waveStarted"; wave: number }
   | { type: "waveCleared"; wave: number }
   | { type: "playerHit"; damage: number; hp: number }
-  | { type: "power"; power: GiftPower }
+  /** `count` são as unidades do presente; a explosão e a cura valem uma vez. */
+  | { type: "power"; power: GiftPower; count: number }
   | { type: "defeated"; stats: SessionStats }
   | { type: "victory"; stats: SessionStats };
 
@@ -29,10 +31,11 @@ export interface LiveFeedback {
   tone: "score" | "heal" | "boost" | "chat" | "power";
 }
 
-/** Resultado de aplicar um evento da live: textos para a tela e acontecimentos para a cena. */
+/** Resultado de aplicar um evento da live: textos para a tela, acontecimentos para a cena e o aviso central. */
 export interface LiveOutcome {
   feedback: LiveFeedback[];
   events: SessionEvent[];
+  spotlight?: Spotlight;
 }
 
 /**
@@ -53,6 +56,7 @@ export class GameSession {
   private intermissionMs = 0;
   private turboMs = 0;
   private shieldMs = 0;
+  private berserkMs = 0;
   private likeProgress = 0;
 
   get phase(): SessionPhase {
@@ -112,17 +116,32 @@ export class GameSession {
     return this.shieldMs;
   }
 
+  get berserkActive(): boolean {
+    return this.berserkMs > 0;
+  }
+
+  get berserkRemainingMs(): number {
+    return this.berserkMs;
+  }
+
+  /** Multiplicador de velocidade de movimento (a fúria deixa o personagem mais rápido). */
+  get moveMultiplier(): number {
+    return this.berserkActive ? BERSERK.moveMultiplier : 1;
+  }
+
   get attackCooldownMs(): number {
+    if (this.berserkActive) return BERSERK.attackCooldownMs;
     return this.turboActive ? PLAYER.attackCooldownMs / LIVE_EFFECTS.boostAttackSpeedMultiplier : PLAYER.attackCooldownMs;
   }
 
   get projectileDamage(): number {
+    if (this.berserkActive) return HITKILL_DAMAGE;
     return this.turboActive ? PLAYER.boostedProjectileDamage : PLAYER.projectileDamage;
   }
 
-  /** Verdadeiro durante a invulnerabilidade após um golpe ou com o escudo ativo. */
+  /** Verdadeiro durante a invulnerabilidade após um golpe, com o escudo ou com a fúria. */
   get isInvulnerable(): boolean {
-    return this.invulnerableMs > 0 || this.shieldMs > 0;
+    return this.invulnerableMs > 0 || this.shieldMs > 0 || this.berserkMs > 0;
   }
 
   start(): SessionEvent[] {
@@ -138,6 +157,7 @@ export class GameSession {
     this.invulnerableMs = Math.max(0, this.invulnerableMs - dtMs);
     this.turboMs = Math.max(0, this.turboMs - dtMs);
     this.shieldMs = Math.max(0, this.shieldMs - dtMs);
+    this.berserkMs = Math.max(0, this.berserkMs - dtMs);
 
     if (this.currentPhase === "intermission") {
       this.intermissionMs -= dtMs;
@@ -201,29 +221,46 @@ export class GameSession {
     this.currentHp = Math.min(PLAYER.maxHp, this.currentHp + amount);
   }
 
-  /** Ativa o turbo; se já estiver ativo, mantém o maior tempo restante. */
+  /** Turbo: o tempo se soma ao que já existe, até o teto de EFFECT_CAP_MS. */
   activateTurbo(durationMs: number): void {
-    this.turboMs = Math.max(this.turboMs, durationMs);
+    this.turboMs = Math.min(EFFECT_CAP_MS, this.turboMs + durationMs);
   }
 
-  /** Ativa o escudo; se já estiver ativo, mantém o maior tempo restante. */
+  /** Escudo: o tempo se soma ao que já existe, até o teto de EFFECT_CAP_MS. */
   activateShield(durationMs: number): void {
-    this.shieldMs = Math.max(this.shieldMs, durationMs);
+    this.shieldMs = Math.min(EFFECT_CAP_MS, this.shieldMs + durationMs);
   }
 
-  /** Converte um evento da live em efeitos de jogo, textos para a tela e acontecimentos para a cena. */
+  /** Fúria: o tempo se soma ao que já existe, até o teto de EFFECT_CAP_MS. */
+  activateBerserk(durationMs: number): void {
+    this.berserkMs = Math.min(EFFECT_CAP_MS, this.berserkMs + durationMs);
+  }
+
+  /** Converte um evento da live em efeitos de jogo, textos para a tela, acontecimentos e o aviso central. */
   applyLiveEvent(event: LiveEvent): LiveOutcome {
     switch (event.kind) {
       case "like": {
         this.likeProgress += event.count;
         this.currentScore += event.count;
         const feedback: LiveFeedback[] = [{ text: `+${event.count} curtidas`, tone: "score" }];
+        let healed = 0;
         while (this.likeProgress >= LIVE_EFFECTS.likesPerHeal) {
           this.likeProgress -= LIVE_EFFECTS.likesPerHeal;
           this.heal(LIVE_EFFECTS.likeHealAmount);
+          healed += LIVE_EFFECTS.likeHealAmount;
           feedback.push({ text: `Cura +${LIVE_EFFECTS.likeHealAmount}`, tone: "heal" });
         }
-        return { feedback, events: [] };
+        const spotlight: Spotlight = {
+          kind: "like",
+          userId: event.userId,
+          userName: event.userName,
+          ...(event.avatarUrl ? { avatarUrl: event.avatarUrl } : {}),
+          title: likeTitle(event.count),
+          effect: healed > 0 ? `Cura +${healed}` : "",
+          tier: 0,
+          count: event.count,
+        };
+        return { feedback, events: [], spotlight };
       }
       case "comment": {
         this.currentScore += LIVE_EFFECTS.commentScore;
@@ -231,17 +268,34 @@ export class GameSession {
       }
       case "gift": {
         this.currentScore += event.diamonds;
+        // O poder vem do valor de UMA unidade: 20 rosas são 20 rosas, cada uma com seu turbo.
+        const count = Math.max(1, event.count ?? 1);
+        const power = powerForGift(Math.floor(event.diamonds / count));
         const feedback: LiveFeedback[] = [
-          { text: `${event.userName} enviou ${event.giftName} (${event.diamonds})`, tone: "boost" },
+          {
+            text: `${event.userName} enviou ${count > 1 ? `${count}x ` : ""}${event.giftName} (${event.diamonds})`,
+            tone: "boost",
+          },
         ];
-        const power = powerForGift(event.diamonds);
-        if (!power || this.isOver) return { feedback, events: [] };
+        const spotlight: Spotlight = {
+          kind: "gift",
+          userId: event.userId,
+          userName: event.userName,
+          ...(event.avatarUrl ? { avatarUrl: event.avatarUrl } : {}),
+          title: count > 1 ? `${count}x ${event.giftName}` : event.giftName,
+          effect: power ? effectText(power, count) : "",
+          tier: power ? giftTier(power) : 0,
+          count,
+        };
+        if (!power || this.isOver) return { feedback, events: [], spotlight };
 
         feedback.push({ text: `PODER ${power.label}`, tone: "power" });
-        if (power.turboMs > 0) this.activateTurbo(power.turboMs);
-        if (power.shieldMs > 0) this.activateShield(power.shieldMs);
+        const grant = grantFor(power, count);
+        this.activateTurbo(grant.turboMs);
+        this.activateShield(grant.shieldMs);
+        this.activateBerserk(grant.berserkMs);
         this.heal(power.heal);
-        return { feedback, events: [{ type: "power", power }] };
+        return { feedback, events: [{ type: "power", power, count }], spotlight };
       }
     }
   }

@@ -5,7 +5,10 @@ import { LiveEventInbox } from "../core/LiveEventInbox.js";
 
 /** Atualizações vindas do servidor que a cena copia para a HUD uma vez por quadro. */
 export interface FeedUpdates {
+  /** Top 3 da rodada (zerado a cada partida). */
   leaderboard?: LeaderboardEntry[];
+  /** Maior presenteador de toda a live. */
+  allTime?: LeaderboardEntry | null;
   record?: RecordSnapshot;
 }
 
@@ -20,6 +23,8 @@ export class LiveFeed {
   private reportedWave = 0;
   /** Resultados de partidas ainda não confirmados como enviados (ficam aqui se a conexão cair). */
   private readonly unsentOutcomes: RunOutcome[] = [];
+  /** Verdadeiro quando o início da partida não pôde ser enviado (conexão fora). */
+  private runStartPending = false;
 
   constructor(private readonly onConnectionChange: (state: ConnectionState) => void) {}
 
@@ -32,7 +37,10 @@ export class LiveFeed {
       onState: (state: ConnectionState) => {
         // Ao (re)conectar, reenvia a maior onda e os resultados pendentes para nada se perder offline.
         if (state === "open" && this.reportedWave > 0) this.send({ type: "game:waveReached", wave: this.reportedWave });
-        if (state === "open") this.flushOutcomes();
+        if (state === "open") {
+          this.flushRunStart();
+          this.flushOutcomes();
+        }
         this.onConnectionChange(state);
       },
     });
@@ -49,6 +57,12 @@ export class LiveFeed {
     if (wave <= this.reportedWave) return;
     this.reportedWave = wave;
     this.send({ type: "game:waveReached", wave });
+  }
+
+  /** Informa o início de uma partida: o servidor zera o top da rodada. */
+  reportRunStarted(): void {
+    this.runStartPending = true;
+    this.flushRunStart();
   }
 
   /** Informa o fim de uma partida (vitória ou derrota). Se a conexão estiver fora, envia ao reconectar. */
@@ -72,6 +86,10 @@ export class LiveFeed {
     return this.socket?.send(message) ?? false;
   }
 
+  private flushRunStart(): void {
+    if (this.runStartPending && this.send({ type: "game:runStarted" })) this.runStartPending = false;
+  }
+
   /** Envia os resultados na ordem; para no primeiro que não sair, para tentar de novo depois. */
   private flushOutcomes(): void {
     while (this.unsentOutcomes.length > 0) {
@@ -88,6 +106,7 @@ export class LiveFeed {
         return;
       case "leaderboard":
         this.pendingUpdates.leaderboard = message.entries;
+        this.pendingUpdates.allTime = message.allTime;
         return;
       case "record":
         this.pendingUpdates.record = message.record;

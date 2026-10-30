@@ -39,6 +39,7 @@ export type ClientMessage =
   | { type: "admin:auto"; enabled: boolean; intervalMs?: number }
   | { type: "admin:resetLeaderboard" }
   | { type: "game:waveReached"; wave: number }
+  | { type: "game:runStarted" }
   | { type: "game:runEnded"; outcome: RunOutcome };
 
 /** Mensagens enviadas pelo servidor aos clientes. */
@@ -47,7 +48,7 @@ export type ServerMessage =
   | { type: "live:event"; event: LiveEvent }
   | { type: "status"; providerStatus: ProviderStatus; autoEnabled: boolean }
   | { type: "record"; record: RecordSnapshot }
-  | { type: "leaderboard"; entries: LeaderboardEntry[] }
+  | { type: "leaderboard"; entries: LeaderboardEntry[]; allTime: LeaderboardEntry | null }
   | { type: "error"; message: string };
 
 export const AUTO_INTERVAL_LIMITS = { minMs: 300, maxMs: 30_000, defaultMs: 2_000 } as const;

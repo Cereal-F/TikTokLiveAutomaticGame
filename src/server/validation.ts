@@ -59,6 +59,20 @@ function readNumber(
   return ok(raw);
 }
 
+/**
+ * Foto de perfil: só links http(s) e de tamanho razoável. Qualquer outra coisa é descartada
+ * sem recusar o evento inteiro, pois a foto é só enfeite.
+ */
+function avatarField(raw: unknown): { avatarUrl?: string } {
+  if (typeof raw !== "string" || raw.length > LIMITS.avatarUrlMaxLength) return {};
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" || url.protocol === "http:" ? { avatarUrl: url.toString() } : {};
+  } catch {
+    return {};
+  }
+}
+
 function isLiveEventKind(value: unknown): value is LiveEventKind {
   return typeof value === "string" && (LIVE_EVENT_KINDS as readonly string[]).includes(value);
 }
@@ -87,6 +101,7 @@ export function parseLiveEvent(raw: unknown): Result<LiveEvent> {
     userName: userName.value,
     timestamp: timestamp.value,
     source: source as LiveEventSource,
+    ...avatarField(raw.avatarUrl),
   };
 
   switch (kind) {
@@ -105,7 +120,12 @@ export function parseLiveEvent(raw: unknown): Result<LiveEvent> {
       if (!giftName.ok) return giftName;
       const diamonds = readNumber(raw, "diamonds", { min: 0, max: LIMITS.giftDiamondsMax, integer: true }, "diamonds");
       if (!diamonds.ok) return diamonds;
-      return ok({ ...base, kind, giftName: giftName.value, diamonds: diamonds.value });
+      const count =
+        raw.count === undefined
+          ? { ok: true as const, value: 1 }
+          : readNumber(raw, "count", { min: 1, max: LIMITS.giftCountMax, integer: true }, "count");
+      if (!count.ok) return count;
+      return ok({ ...base, kind, giftName: giftName.value, diamonds: diamonds.value, count: count.value });
     }
   }
 }
@@ -149,6 +169,9 @@ export function parseClientMessage(raw: unknown): Result<ClientMessage> {
       const wave = readNumber(raw, "wave", { ...WAVE_LIMITS, integer: true }, "wave");
       if (!wave.ok) return wave;
       return ok({ type: "game:waveReached", wave: wave.value });
+    }
+    case "game:runStarted": {
+      return ok({ type: "game:runStarted" });
     }
     case "game:runEnded": {
       if (raw.outcome !== "victory" && raw.outcome !== "defeat") return fail("resultado da partida inválido");

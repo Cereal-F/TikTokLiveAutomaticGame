@@ -186,7 +186,7 @@ describe("GameSession: presentes e poderes", () => {
     const { feedback, events } = session.applyLiveEvent(giftEvent("g1", "u1", "Rosa", 1));
     expect(session.score).toBe(1);
     expect(session.turboActive).toBe(true);
-    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[0] }]);
+    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[0], count: 1 }]);
     expect(feedback.map((f) => f.tone)).toEqual(["boost", "power"]);
   });
 
@@ -213,19 +213,20 @@ describe("GameSession: presentes e poderes", () => {
     const session = new GameSession();
     session.start();
     const { events } = session.applyLiveEvent(giftEvent("g1", "u1", "Leão", 100));
-    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[2] }]);
+    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[2], count: 1 }]);
     expect(session.turboActive).toBe(false);
+    expect(session.berserkActive).toBe(true);
   });
 
-  it("um presente de 500 diamantes cura, ativa turbo e gera a tempestade", () => {
+  it("um presente de 500 diamantes cura, ativa a fúria e gera a tempestade", () => {
     const session = new GameSession();
     session.start();
     session.damagePlayer(60);
     const { events } = session.applyLiveEvent(giftEvent("g1", "u1", "Foguete", 500));
-    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[3] }]);
+    expect(events).toEqual([{ type: "power", power: GIFT_POWERS[3], count: 1 }]);
     // 100 - 60 de dano + 30 de cura da tempestade = 70.
     expect(session.hp).toBe(70);
-    expect(session.turboActive).toBe(true);
+    expect(session.berserkActive).toBe(true);
   });
 
   it("presentes mais caros têm efeitos mais fortes", () => {
@@ -233,7 +234,9 @@ describe("GameSession: presentes e poderes", () => {
     for (let i = 1; i < tiers.length; i += 1) {
       expect(tiers[i]!.minDiamonds).toBeGreaterThan(tiers[i - 1]!.minDiamonds);
     }
-    expect(tiers[3]!.blastDamage).toBeGreaterThan(tiers[2]!.blastDamage);
+    // O presente de 500 é pelo menos tão forte quanto o de 100 em duração e alcance.
+    expect(tiers[3]!.berserkMs).toBeGreaterThanOrEqual(tiers[2]!.berserkMs);
+    expect(tiers[3]!.blastRadius).toBeGreaterThan(tiers[2]!.blastRadius);
   });
 
   it("presentes de valor zero não ativam poder algum", () => {

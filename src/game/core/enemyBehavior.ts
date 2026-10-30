@@ -33,19 +33,32 @@ const SPIRAL_STEP = 0.35;
 const BOSS_CHARGE_MS = 900;
 const BOSS_CHARGE_SPEED_FACTOR = 3.5;
 
-function perpendicular(v: Point): Point {
-  return { x: -v.y, y: v.x };
-}
-
 function negate(v: Point): Point {
   return { x: -v.x, y: -v.y };
 }
 
-/** Atirador: mantém distância do personagem, recua se ficar perto demais e dispara a cada intervalo. */
+/** Gira um vetor pelo ângulo dado (radianos). */
+export function rotate(v: Point, angle: number): Point {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos };
+}
+
+/**
+ * Desvios de mira dos tiros do atirador, em ciclo. Alguns tiros passam longe do personagem,
+ * então ele não é atingido sempre que o atirador dispara: dá para se mover e escapar.
+ */
+const AIM_OFFSETS: readonly number[] = [0, 0.1, -0.1, 0.22, -0.22];
+
+/**
+ * Atirador: aproxima-se até a distância ideal, recua se ficar perto demais e, na faixa ideal,
+ * fica quase parado mirando (sem dar voltas no personagem). Dispara a cada intervalo, com desvio de mira.
+ */
 export class ShooterBrain {
   private cooldownMs = SHOOTER.fireIntervalMs / 2;
+  private shotCount = 0;
 
-  step(self: Point, target: Point, others: readonly Point[], dtMs: number): Intent & { fire: boolean } {
+  step(self: Point, target: Point, others: readonly Point[], dtMs: number): Intent & { fire: boolean; aim: number } {
     const d = distance(self, target);
     const toward = chaseDirection(self, target, others);
 
@@ -58,18 +71,20 @@ export class ShooterBrain {
       direction = negate(toward);
       speedFactor = 1;
     } else {
-      // Dentro da faixa ideal, anda de lado em volta do personagem.
-      direction = perpendicular(toward);
-      speedFactor = 0.5;
+      direction = toward;
+      speedFactor = 0.15;
     }
 
     this.cooldownMs -= dtMs;
     let fire = false;
+    let aim = 0;
     if (this.cooldownMs <= 0 && d <= SHOOTER.fireRangeDistance) {
       fire = true;
+      aim = AIM_OFFSETS[this.shotCount % AIM_OFFSETS.length] ?? 0;
+      this.shotCount += 1;
       this.cooldownMs = SHOOTER.fireIntervalMs;
     }
-    return { direction, speedFactor, fire };
+    return { direction, speedFactor, fire, aim };
   }
 }
 

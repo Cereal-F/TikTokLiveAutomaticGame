@@ -6,6 +6,7 @@ import { Autopilot } from "../core/autopilot.js";
 import { PLAYER, PROJECTILE, SHOT, SPEED, WORLD } from "../core/constants.js";
 import { GameSession, type SessionEvent, type SessionStats } from "../core/GameSession.js";
 import { powerForGift, giftTier, type GiftPower } from "../core/powers.js";
+import { SpotlightQueue, type Spotlight } from "../core/spotlight.js";
 import { edgeSpawnPoint } from "../core/spawnPoints.js";
 import { distance, directionTo, findNearest, type Point } from "../core/targeting.js";
 import type { Volley } from "../core/enemyBehavior.js";
@@ -16,6 +17,7 @@ import { Player } from "../entities/Player.js";
 import { Projectile } from "../entities/Projectile.js";
 import { LiveFeed } from "../net/LiveFeed.js";
 import { Hud, type RecordView } from "../ui/Hud.js";
+import { SpotlightView } from "../ui/SpotlightView.js";
 import { SCENE_KEYS } from "./keys.js";
 import type { GameOverData } from "./GameOverScene.js";
 
@@ -38,6 +40,10 @@ export class ArenaScene extends Phaser.Scene {
   /** Criado uma vez: a fila de resultados que ainda não chegaram ao servidor sobrevive entre partidas. */
   private liveFeed: LiveFeed | null = null;
   private hudAlive = false;
+  /** Avisos no meio da tela (quem enviou, o presente e o efeito), um por vez. */
+  private spotlights = new SpotlightQueue();
+  private spotlightView: SpotlightView | null = null;
+  private shownSpotlight: Spotlight | null = null;
   private attackCooldownMs = 0;
   private ended = false;
   /** Recorde e contadores vindos do servidor (e atualizados localmente ao fim de cada partida). */
@@ -59,6 +65,8 @@ export class ArenaScene extends Phaser.Scene {
     this.attackCooldownMs = 0;
     this.ended = false;
     this.recordBeatenThisRun = false;
+    this.spotlights = new SpotlightQueue();
+    this.shownSpotlight = null;
 
     // Efeitos visuais (tweens e atrasos) acompanham a mesma aceleração da partida.
     this.time.timeScale = SPEED.timeScale;
@@ -76,9 +84,15 @@ export class ArenaScene extends Phaser.Scene {
       if (this.hudAlive) this.hud.setConnection(state);
     });
     this.liveFeed.start();
+    // Cada partida é uma rodada nova: o servidor zera o top de presenteadores da rodada.
+    this.liveFeed.reportRunStarted();
+    this.spotlightView = new SpotlightView(this);
     this.events.once("shutdown", () => {
       this.hudAlive = false;
       this.liveFeed?.stop();
+      this.spotlightView?.destroy();
+      this.spotlightView = null;
+      this.shownSpotlight = null;
     });
 
     this.handleSessionEvents(this.session.start());
@@ -103,13 +117,15 @@ export class ArenaScene extends Phaser.Scene {
       world: WORLD,
     });
     // A arrancada (dash) aumenta a velocidade máxima; a aceleração suave continua valendo.
-    this.player.move(direction, dt, this.autopilot.dashMultiplier(dt));
+    // A fúria deixa o personagem mais rápido; a arrancada aumenta a velocidade máxima.
+    this.player.move(direction, dt, this.autopilot.dashMultiplier(dt) * this.session.moveMultiplier);
     this.updateAttack(dt);
     this.updateProjectiles(dt);
     this.updateEnemies(dt);
     if (this.ended) return;
     this.updateEnemyShots(dt);
     if (this.ended) return;
+    this.updateSpotlight();
 
     this.hud.update({
       hp: this.session.hp,
@@ -120,13 +136,23 @@ export class ArenaScene extends Phaser.Scene {
       phase: this.session.phase,
       turboRemainingMs: this.session.turboRemainingMs,
       shieldRemainingMs: this.session.shieldRemainingMs,
+      berserkRemainingMs: this.session.berserkRemainingMs,
     });
+  }
+
+  /** Mostra o aviso da fila que está na vez; troca só quando o aviso atual terminou. */
+  private updateSpotlight(): void {
+    const item = this.spotlights.tick(this.time.now);
+    if (item === this.shownSpotlight) return;
+    this.shownSpotlight = item;
+    if (item) this.spotlightView?.show(item);
+    else this.spotlightView?.hide();
   }
 
   private applyServerUpdates(): void {
     const updates = this.liveFeed?.takeUpdates();
     if (!updates) return;
-    if (updates.leaderboard) this.hud.setLeaderboard(updates.leaderboard);
+    if (updates.leaderboard) this.hud.setLeaderboard(updates.leaderboard, updates.allTime ?? null);
     if (updates.record) {
       this.recordLoaded = true;
       this.record = {
@@ -145,6 +171,7 @@ export class ArenaScene extends Phaser.Scene {
   private handleLiveEvent(event: LiveEvent): void {
     const outcome = this.session.applyLiveEvent(event);
     this.hud.pushFeedback(outcome.feedback);
+    if (outcome.spotlight) this.spotlights.push(outcome.spotlight);
     if (event.kind === "gift") {
       const power = powerForGift(event.diamonds);
       const suffix = power ? ` > ${power.label}` : "";

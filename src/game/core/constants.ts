@@ -96,6 +96,22 @@ export const AUTOPILOT = {
   waypointReachedDistance: 40,
 } as const;
 
+/**
+ * Efeitos de presentes (turbo, escudo e fúria) somam o tempo de cada presente.
+ * Este é o teto do tempo acumulado, para um efeito não durar para sempre.
+ */
+export const EFFECT_CAP_MS = 120_000;
+
+/**
+ * Fúria (presentes de 100 e 500): imunidade, tiro rápido e dano que mata qualquer inimigo
+ * de um golpe, inclusive chefes. O personagem também anda mais rápido.
+ */
+export const BERSERK = {
+  attackCooldownMs: 60,
+  hitKillDamage: 9_999,
+  moveMultiplier: 1.6,
+} as const;
+
 /** Reinício automático da partida após a derrota. */
 export const RUN = {
   restartDelayMs: 6_000,
@@ -124,20 +140,23 @@ export const ENEMY_TYPES = {
   },
   charger: {
     hpFactor: 0.7,
-    speedFactor: 1,
+    speedFactor: 0.7,
     radius: 16,
-    contactDamage: 10,
+    contactDamage: 6,
+    /** Limite de saltadores por onda: em grupo, as arrancadas se somam e a fuga fica impossível. */
+    maxPerWave: 16,
     /** Tempo de aproximação lenta antes de cada arrancada. */
-    approachMs: 2_600,
+    approachMs: 3_000,
     approachSpeedFactor: 0.8,
-    chargeMs: 550,
-    chargeSpeedFactor: 3.2,
+    chargeMs: 500,
+    chargeSpeedFactor: 2.2,
   },
   tank: {
     hpFactor: 2.2,
     speedFactor: 0.6,
     radius: 22,
     contactDamage: 12,
+    maxPerWave: 24,
   },
 } as const;
 

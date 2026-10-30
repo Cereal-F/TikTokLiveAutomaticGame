@@ -28,7 +28,7 @@ describe("RecordStore", () => {
     const store = new RecordStore(file, fixedNow, silent);
     const updated = store.update(7);
     expect(updated).toEqual({ bestWave: 7, achievedAt: "2026-10-29T03:00:00.000Z", wins: 0, defeats: 0 });
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(updated);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...updated, giftTotals: {} });
   });
 
   it("não substitui o recorde por uma onda igual ou menor", () => {

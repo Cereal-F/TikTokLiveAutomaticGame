@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WAVES } from "../../src/game/core/constants.js";
+import { ENEMY_TYPES, WAVES } from "../../src/game/core/constants.js";
 import { bossConfig, commonBodyFor, isBossWave, killPoints, upcomingWaves, waveConfig } from "../../src/game/core/waves.js";
 
 describe("waveConfig", () => {
@@ -29,7 +29,8 @@ describe("waveConfig", () => {
 
   it("respeita os limites máximos em ondas altas, inclusive numa onda de chefe", () => {
     const late = waveConfig(101);
-    expect(late.enemyCount).toBe(WAVES.maxEnemiesPerWave);
+    // Ouriço (ondas 16 a 20) tem teto próprio de inimigos por onda.
+    expect(late.enemyCount).toBe(ENEMY_TYPES.tank.maxPerWave);
     expect(late.spawnIntervalMs).toBe(WAVES.minSpawnIntervalMs);
     // Vida base no teto (40) multiplicada pelo fator do último tipo (ouriço, 2.2).
     expect(late.enemyHp).toBe(88);
