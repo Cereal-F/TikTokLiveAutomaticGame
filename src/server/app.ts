@@ -1,7 +1,7 @@
 import http from "node:http";
 import { WebSocketServer } from "ws";
 import type { LiveEvent } from "../shared/events.js";
-import type { ClientMessage, ClientRole, ProviderStatus } from "../shared/protocol.js";
+import type { ClientMessage, ClientRole, ProviderStatus, ServerMessage } from "../shared/protocol.js";
 import { AUTO_INTERVAL_LIMITS } from "../shared/protocol.js";
 import type { ServerConfig } from "./config.js";
 import { ClientHub, type ClientContext, type HubHandler } from "./net/ClientHub.js";
@@ -24,6 +24,8 @@ const LIKE_FLUSH_MS = 250;
 const HEARTBEAT_MS = 20_000;
 const WS_PATH = "/ws";
 const LEADERBOARD_SIZE = 3;
+/** Intervalo para gravar o histórico de presentes da live (evita uma escrita a cada presente). */
+const RECORD_FLUSH_MS = 5_000;
 
 /**
  * Monta o servidor: HTTP (jogo e painel), WebSocket em /ws, pipeline de eventos,
@@ -41,13 +43,21 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
   const leaderboard = new GiftLeaderboard();
   const records = new RecordStore(config.recordsFile, () => new Date(now()), log);
 
+  /** Ranking da rodada (zerado a cada partida) e o top da live (guardado entre partidas). */
+  const leaderboardMessage = (): ServerMessage => ({
+    type: "leaderboard",
+    entries: leaderboard.top(LEADERBOARD_SIZE),
+    allTime: records.topGifter(),
+  });
+
   const broadcastLeaderboard = (): void => {
-    hub.broadcast({ type: "leaderboard", entries: leaderboard.top(LEADERBOARD_SIZE) });
+    hub.broadcast(leaderboardMessage());
   };
 
   const emitEvent = (event: LiveEvent): void => {
     if (event.kind === "gift") {
       leaderboard.add(event.userId, event.userName, event.diamonds);
+      records.addGift(event.userId, event.userName, event.diamonds);
       broadcastLeaderboard();
     }
     hub.broadcast({ type: "live:event", event });
@@ -74,7 +84,7 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
         autoEnabled: simulator.autoEnabled,
       });
       client.send({ type: "record", record: records.snapshot() });
-      client.send({ type: "leaderboard", entries: leaderboard.top(LEADERBOARD_SIZE) });
+      client.send(leaderboardMessage());
     },
     onMessage(client: ClientContext, message: ClientMessage): void {
       if (message.type === "game:waveReached") {
@@ -84,6 +94,17 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
         }
         const updated = records.update(message.wave);
         if (updated) hub.broadcast({ type: "record", record: updated });
+        return;
+      }
+
+      if (message.type === "game:runStarted") {
+        if (client.role !== "game") {
+          client.send({ type: "error", message: "apenas o jogo informa o início de uma partida" });
+          return;
+        }
+        // Cada partida é uma rodada nova: o ranking da rodada recomeça do zero.
+        leaderboard.reset();
+        broadcastLeaderboard();
         return;
       }
 
@@ -156,10 +177,14 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
   };
 
   let flushTimer: ReturnType<typeof setInterval> | null = null;
+  let recordFlushTimer: ReturnType<typeof setInterval> | null = null;
 
   const stopTimers = (): void => {
     if (flushTimer) clearInterval(flushTimer);
+    if (recordFlushTimer) clearInterval(recordFlushTimer);
     flushTimer = null;
+    recordFlushTimer = null;
+    records.flush();
   };
 
   return {
@@ -172,6 +197,7 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
     async start(): Promise<void> {
       hub.attach();
       flushTimer = setInterval(() => pipeline.flushLikes(), LIKE_FLUSH_MS);
+      recordFlushTimer = setInterval(() => records.flush(), RECORD_FLUSH_MS);
       try {
         provider.start(sink);
       } catch (error) {

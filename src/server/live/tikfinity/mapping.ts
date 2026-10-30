@@ -21,15 +21,16 @@ export interface TikFinityEnvelope {
 export interface EventFields {
   userId: string;
   userName: string;
+  avatarUrl?: string;
 }
 
 /** Evento pronto para receber id, timestamp e origem no provedor. */
 export type EventDraft =
   | (EventFields & { kind: "comment"; text: string })
   | (EventFields & { kind: "like"; count: number })
-  | (EventFields & { kind: "gift"; giftName: string; diamonds: number });
+  | (EventFields & { kind: "gift"; giftName: string; diamonds: number; count: number });
 
-export type GiftDraft = EventFields & { kind: "gift"; giftName: string; diamonds: number };
+export type GiftDraft = EventFields & { kind: "gift"; giftName: string; diamonds: number; count: number };
 
 /** Mensagem de presente antes da decisão de somar uma sequência (combo). */
 export interface GiftObservation extends EventFields {
@@ -84,9 +85,12 @@ export function readIdentity(data: Obj): EventFields | null {
   const uniqueId = text(data.uniqueId) ?? (typeof data.userId === "number" ? String(data.userId) : text(data.userId));
   if (!uniqueId) return null;
   const nickname = text(data.nickname) ?? uniqueId;
+  const avatarUrl = text(data.profilePictureUrl);
   return {
     userId: clip(uniqueId, LIMITS.userNameMaxLength),
     userName: clip(nickname, LIMITS.userNameMaxLength),
+    // Campo de foto ainda não conferido contra uma sessão real (ver README); sem ele, a tela mostra uma inicial.
+    ...(avatarUrl ? { avatarUrl: clip(avatarUrl, LIMITS.avatarUrlMaxLength) } : {}),
   };
 }
 
@@ -133,12 +137,15 @@ export function readGift(data: Obj): GiftObservation | null {
 
 /** Valor total de um presente com `repeat` unidades, limitado ao teto aceito pelo pipeline. */
 export function giftDraft(base: EventFields & { giftName: string; diamondCount: number }, repeat: number): GiftDraft {
-  const total = base.diamondCount * Math.max(1, repeat);
+  const units = Math.min(Math.max(1, repeat), LIMITS.giftCountMax);
+  const total = base.diamondCount * units;
   return {
     userId: base.userId,
     userName: base.userName,
+    ...(base.avatarUrl ? { avatarUrl: base.avatarUrl } : {}),
     kind: "gift",
     giftName: base.giftName,
     diamonds: Math.min(total, LIMITS.giftDiamondsMax),
+    count: units,
   };
 }

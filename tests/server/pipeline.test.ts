@@ -81,19 +81,21 @@ describe("RateLimiter", () => {
 describe("LikeCounter", () => {
   it("acumula curtidas e entrega o total de uma vez", () => {
     const counter = new LikeCounter();
-    counter.add(2, "simulation");
-    counter.add(3, "tikfinity");
+    counter.add(2, "simulation", { userId: "u1", userName: "Ana" });
+    counter.add(3, "tikfinity", { userId: "u2", userName: "Bia" });
     expect(counter.pendingCount).toBe(5);
-    expect(counter.take()).toEqual({ count: 5, source: "tikfinity" });
+    // Entrega o total e o último espectador da janela.
+    expect(counter.take()).toEqual({ count: 5, source: "tikfinity", sender: { userId: "u2", userName: "Bia" } });
     expect(counter.take()).toBeNull();
     expect(counter.pendingCount).toBe(0);
   });
 
   it("ignora contagens inválidas", () => {
     const counter = new LikeCounter();
-    counter.add(0, "simulation");
-    counter.add(-4, "simulation");
-    counter.add(1.5, "simulation");
+    const sender = { userId: "u1", userName: "Ana" };
+    counter.add(0, "simulation", sender);
+    counter.add(-4, "simulation", sender);
+    counter.add(1.5, "simulation", sender);
     expect(counter.take()).toBeNull();
   });
 });
@@ -133,7 +135,8 @@ describe("EventPipeline", () => {
 
     pipeline.flushLikes();
     expect(emitted).toHaveLength(1);
-    expect(emitted[0]).toMatchObject({ kind: "like", count: 5, userId: "audience", id: "likes-batch-1" });
+    // A curtida agregada mostra o último espectador que curtiu na janela.
+    expect(emitted[0]).toMatchObject({ kind: "like", count: 5, userId: "u2", id: "likes-batch-1" });
 
     pipeline.flushLikes();
     expect(emitted).toHaveLength(1);

@@ -61,7 +61,11 @@ export class EventPipeline {
     }
 
     if (event.kind === "like") {
-      this.likes.add(event.count, event.source);
+      this.likes.add(event.count, event.source, {
+        userId: event.userId,
+        userName: event.userName,
+        ...(event.avatarUrl ? { avatarUrl: event.avatarUrl } : {}),
+      });
     } else {
       this.emit(event);
     }
@@ -76,8 +80,9 @@ export class EventPipeline {
     this.emit({
       id: `likes-batch-${this.batchSequence}`,
       kind: "like",
-      userId: "audience",
-      userName: "Plateia",
+      userId: batch.sender.userId,
+      userName: batch.sender.userName,
+      ...(batch.sender.avatarUrl ? { avatarUrl: batch.sender.avatarUrl } : {}),
       timestamp: this.options.now(),
       source: batch.source,
       count: batch.count,

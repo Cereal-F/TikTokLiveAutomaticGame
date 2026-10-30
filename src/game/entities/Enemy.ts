@@ -4,6 +4,7 @@ import { ENEMY_TYPES } from "../core/constants.js";
 import { BossBrain, ChargerBrain, ShooterBrain, type Volley } from "../core/enemyBehavior.js";
 import { chaseDirection } from "../core/enemyMovement.js";
 import { directionTo, type Point } from "../core/targeting.js";
+import { rotate } from "../core/enemyBehavior.js";
 
 /** Como o inimigo se comporta. "chase" persegue; os demais têm um cérebro próprio. */
 export type EnemyBrainSpec =
@@ -105,7 +106,7 @@ export class Enemy {
       speedFactor = intent.speedFactor;
       if (intent.fire) {
         volleys.push({
-          directions: [directionTo(self, target)],
+          directions: [rotate(directionTo(self, target), intent.aim)],
           speed: ENEMY_TYPES.shooter.shotSpeed,
           damage: ENEMY_TYPES.shooter.shotDamage,
         });

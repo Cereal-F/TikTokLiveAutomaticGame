@@ -89,11 +89,11 @@ export function waveConfig(wave: number): WaveConfig {
   const kind = enemyKindForWave(index + 1);
   const hpFactor = kind === "virus" ? 1 : ENEMY_TYPES[kind].hpFactor;
   const speedFactor = kind === "virus" ? 1 : ENEMY_TYPES[kind].speedFactor;
+  // Cada tipo tem seu teto: em grupo, atiradores viram chuva de tiros e saltadores se somam.
   // O chefe conta no total, então a escolta é reduzida em um para respeitar o máximo.
-  const cap = WAVES.maxEnemiesPerWave - (isBoss ? 1 : 0);
-  const baseEscorts = Math.min(cap, 8 + index * 5);
-  // Atiradores em grupo viram chuva de tiros: a escolta deles tem teto próprio.
-  const escorts = kind === "shooter" ? Math.min(baseEscorts, ENEMY_TYPES.shooter.maxPerWave) : baseEscorts;
+  const kindCap = kind === "virus" ? WAVES.maxEnemiesPerWave : Math.min(WAVES.maxEnemiesPerWave, ENEMY_TYPES[kind].maxPerWave);
+  const cap = kindCap - (isBoss ? 1 : 0);
+  const escorts = Math.min(cap, 8 + index * 5);
   const baseHp = Math.min(40, 3 + Math.floor(index * 1.5));
   const baseSpeed = Math.min(260, 96 + index * 10);
   return {

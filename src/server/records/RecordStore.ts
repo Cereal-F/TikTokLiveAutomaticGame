@@ -1,8 +1,16 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { WAVE_LIMITS, type RecordSnapshot, type RunOutcome } from "../../shared/protocol.js";
+import type { LeaderboardEntry } from "../../shared/protocol.js";
 
 const EMPTY: RecordSnapshot = { bestWave: 0, achievedAt: null, wins: 0, defeats: 0 };
+
+interface GiftTotal {
+  userName: string;
+  diamonds: number;
+}
+
+type GiftTotals = Record<string, GiftTotal>;
 
 function isValidRecord(value: unknown): value is RecordSnapshot {
   if (typeof value !== "object" || value === null) return false;
@@ -21,19 +29,38 @@ function counter(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
+/** Lê o histórico de presentes; entradas inválidas são descartadas. */
+function readGiftTotals(value: unknown): GiftTotals {
+  const totals: GiftTotals = {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return totals;
+  for (const [userId, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { userName, diamonds } = entry as { userName?: unknown; diamonds?: unknown };
+    if (typeof userName !== "string" || typeof diamonds !== "number") continue;
+    if (!Number.isInteger(diamonds) || diamonds <= 0) continue;
+    totals[userId] = { userName, diamonds };
+  }
+  return totals;
+}
+
 /**
- * Guarda o recorde de ondas em um arquivo JSON, para que sobreviva a reinícios do servidor.
+ * Guarda em um arquivo JSON o recorde de ondas, as vitórias e derrotas e o total de
+ * presentes de cada espectador desde o início da live (para o "top da live").
  * Falhas de leitura ou escrita são registradas e não interrompem a partida.
  */
 export class RecordStore {
   private current: RecordSnapshot;
+  private giftTotals: GiftTotals;
+  private dirty = false;
 
   constructor(
     private readonly filePath: string,
     private readonly now: () => Date = () => new Date(),
     private readonly log: (message: string) => void = (message) => console.log(`[servidor] ${message}`),
   ) {
-    this.current = this.load();
+    const loaded = this.load();
+    this.current = loaded.record;
+    this.giftTotals = loaded.giftTotals;
   }
 
   snapshot(): RecordSnapshot {
@@ -61,7 +88,29 @@ export class RecordStore {
     return this.snapshot();
   }
 
-  private load(): RecordSnapshot {
+  /** Soma diamantes ao histórico da live. A gravação fica para `flush`, pois presentes podem ser frequentes. */
+  addGift(userId: string, userName: string, diamonds: number): void {
+    if (!Number.isInteger(diamonds) || diamonds <= 0) return;
+    const current = this.giftTotals[userId];
+    this.giftTotals[userId] = { userName, diamonds: (current?.diamonds ?? 0) + diamonds };
+    this.dirty = true;
+  }
+
+  /** Espectador que mais enviou presentes em toda a live, ou null se ainda não houve presentes. */
+  topGifter(): LeaderboardEntry | null {
+    let best: LeaderboardEntry | null = null;
+    for (const total of Object.values(this.giftTotals)) {
+      if (!best || total.diamonds > best.diamonds) best = { userName: total.userName, diamonds: total.diamonds };
+    }
+    return best;
+  }
+
+  /** Grava o histórico de presentes pendente, se houver. */
+  flush(): void {
+    if (this.dirty) this.save();
+  }
+
+  private load(): { record: RecordSnapshot; giftTotals: GiftTotals } {
     let raw: string;
     try {
       raw = readFileSync(this.filePath, "utf8");
@@ -69,27 +118,33 @@ export class RecordStore {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         this.log(`não foi possível ler o recorde: ${(error as Error).message}`);
       }
-      return { ...EMPTY };
+      return { record: { ...EMPTY }, giftTotals: {} };
     }
 
     try {
       const parsed: unknown = JSON.parse(raw);
       if (isValidRecord(parsed)) {
-        return { ...parsed, wins: counter(parsed.wins), defeats: counter(parsed.defeats) };
+        const fields = parsed as unknown as Record<string, unknown>;
+        return {
+          record: { ...parsed, wins: counter(parsed.wins), defeats: counter(parsed.defeats) },
+          giftTotals: readGiftTotals(fields.giftTotals),
+        };
       }
     } catch {
       // Tratado abaixo: arquivo corrompido não deve impedir o jogo de iniciar.
     }
     this.log("arquivo de recorde inválido; o recorde começa do zero");
-    return { ...EMPTY };
+    return { record: { ...EMPTY }, giftTotals: {} };
   }
 
   private save(): void {
     try {
       mkdirSync(path.dirname(this.filePath), { recursive: true });
       const temporary = `${this.filePath}.tmp`;
-      writeFileSync(temporary, JSON.stringify(this.current, null, 2), "utf8");
+      const data = { ...this.current, giftTotals: this.giftTotals };
+      writeFileSync(temporary, JSON.stringify(data, null, 2), "utf8");
       renameSync(temporary, this.filePath);
+      this.dirty = false;
     } catch (error) {
       this.log(`não foi possível salvar o recorde: ${(error as Error).message}`);
     }

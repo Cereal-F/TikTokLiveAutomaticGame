@@ -25,7 +25,7 @@ export interface RecordView {
 const STRIP = { x: 24, y: 180, blockWidth: 128, blockHeight: 56, gap: 8, count: 5 } as const;
 const PANEL_Y = 262;
 const LEGEND_PANEL = { x: 24, width: 384, height: 160 } as const;
-const LEADER_PANEL = { x: 420, width: 276, height: 160 } as const;
+const LEADER_PANEL = { x: 420, width: 276, height: 200 } as const;
 /** Borda direita do texto do top 3, com margem interna do painel. */
 const LEADER_RIGHT = LEADER_PANEL.x + LEADER_PANEL.width - 12;
 
@@ -38,6 +38,7 @@ interface SessionSnapshot {
   phase: SessionPhase;
   turboRemainingMs: number;
   shieldRemainingMs: number;
+  berserkRemainingMs: number;
 }
 
 /** Linha do feed de presentes: quem enviou, o presente e o poder ativado. */
@@ -124,6 +125,7 @@ export class Hud {
   private readonly countersText: Phaser.GameObjects.Text;
   private readonly effectsText: Phaser.GameObjects.Text;
   private readonly connectionText: Phaser.GameObjects.Text;
+  private readonly allTimeText: Phaser.GameObjects.Text;
   private readonly bannerText: Phaser.GameObjects.Text;
   private readonly leaderLines: Phaser.GameObjects.Text[] = [];
   private readonly waveBlocks: WaveBlock[] = [];
@@ -158,7 +160,7 @@ export class Hud {
     const panelX = LEADER_PANEL.x;
     scene.add.rectangle(panelX, PANEL_Y, LEADER_PANEL.width, LEADER_PANEL.height, 0x000000, 0.45).setOrigin(0).setDepth(depth - 1);
     scene.add
-      .text(LEADER_RIGHT, PANEL_Y + 8, "TOP 3 PRESENTES", { ...label, fontSize: "20px", color: "#ffd23f" })
+      .text(LEADER_RIGHT, PANEL_Y + 8, "TOP 3 DA RODADA", { ...label, fontSize: "20px", color: "#ffd23f" })
       .setOrigin(1, 0)
       .setDepth(depth);
     for (let i = 0; i < 3; i += 1) {
@@ -169,6 +171,16 @@ export class Hud {
           .setDepth(depth),
       );
     }
+
+    // Espaço de baixo do painel: o maior presenteador de toda a live, que não zera entre rodadas.
+    scene.add
+      .text(LEADER_RIGHT, PANEL_Y + 150, "TOP DA LIVE", { ...label, fontSize: "18px", color: "#ffd23f" })
+      .setOrigin(1, 0)
+      .setDepth(depth);
+    this.allTimeText = scene.add
+      .text(LEADER_RIGHT, PANEL_Y + 174, "", { ...label, fontSize: "20px", color: "#e8ecff" })
+      .setOrigin(1, 0)
+      .setDepth(depth);
 
     this.connectionText = scene.add
       .text(24, WORLD.height - 24, "", { fontFamily: FONT, fontSize: "18px", color: "#8a93b8" })
@@ -194,7 +206,7 @@ export class Hud {
     this.waveText.setText(`FASE ${snapshot.wave}/${CAMPAIGN.levels}`);
     this.timeText.setText(`TEMPO ${formatTime(snapshot.survivedMs)}`);
     this.scoreText.setText(`PONTOS ${snapshot.score}`);
-    this.effectsText.setText(effectsLabel(snapshot.turboRemainingMs, snapshot.shieldRemainingMs));
+    this.effectsText.setText(effectsLabel(snapshot.turboRemainingMs, snapshot.shieldRemainingMs, snapshot.berserkRemainingMs));
     this.showWaveStrip(snapshot.wave);
     const now = this.scene.time.now;
     this.feedback.fade(now);
@@ -291,11 +303,13 @@ export class Hud {
     this.countersText.setText(record === null ? "" : `VITÓRIAS ${record.wins}   DERROTAS ${record.defeats}`);
   }
 
-  setLeaderboard(entries: LeaderboardEntry[]): void {
+  /** Top 3 da rodada e o maior presenteador da live (null = ninguém ainda). */
+  setLeaderboard(entries: LeaderboardEntry[], allTime: LeaderboardEntry | null): void {
     this.leaderLines.forEach((line, index) => {
       const entry = entries[index];
       line.setText(entry ? `${index + 1}. ${entry.userName.slice(0, LEADER_NAME_CHARS)} ${entry.diamonds}` : "");
     });
+    this.allTimeText.setText(allTime ? `${allTime.userName.slice(0, LEADER_NAME_CHARS)} ${allTime.diamonds}` : "—");
   }
 
   setConnection(state: ConnectionState): void {
@@ -323,9 +337,10 @@ export class Hud {
   }
 }
 
-function effectsLabel(turboMs: number, shieldMs: number): string {
+function effectsLabel(turboMs: number, shieldMs: number, berserkMs: number): string {
   const parts: string[] = [];
   if (turboMs > 0) parts.push(`TURBO ${Math.ceil(turboMs / 1000)}s`);
   if (shieldMs > 0) parts.push(`ESCUDO ${Math.ceil(shieldMs / 1000)}s`);
+  if (berserkMs > 0) parts.push(`FÚRIA ${Math.ceil(berserkMs / 1000)}s`);
   return parts.join("   ");
 }
