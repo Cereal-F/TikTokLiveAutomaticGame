@@ -87,6 +87,15 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
         return;
       }
 
+      if (message.type === "game:runEnded") {
+        if (client.role !== "game") {
+          client.send({ type: "error", message: "apenas o jogo informa o fim de uma partida" });
+          return;
+        }
+        hub.broadcast({ type: "record", record: records.recordRun(message.outcome) });
+        return;
+      }
+
       if (client.role !== "admin") {
         client.send({ type: "error", message: "apenas o painel pode enviar comandos de simulação" });
         return;

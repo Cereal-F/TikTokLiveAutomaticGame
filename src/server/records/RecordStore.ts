@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { WAVE_LIMITS, type RecordSnapshot } from "../../shared/protocol.js";
+import { WAVE_LIMITS, type RecordSnapshot, type RunOutcome } from "../../shared/protocol.js";
 
-const EMPTY: RecordSnapshot = { bestWave: 0, achievedAt: null };
+const EMPTY: RecordSnapshot = { bestWave: 0, achievedAt: null, wins: 0, defeats: 0 };
 
 function isValidRecord(value: unknown): value is RecordSnapshot {
   if (typeof value !== "object" || value === null) return false;
@@ -14,6 +14,11 @@ function isValidRecord(value: unknown): value is RecordSnapshot {
     candidate.bestWave <= WAVE_LIMITS.max;
   const dateOk = candidate.achievedAt === null || typeof candidate.achievedAt === "string";
   return waveOk && dateOk;
+}
+
+/** Contador antigo (arquivos gravados antes dos contadores) é lido como zero. */
+function counter(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 /**
@@ -40,7 +45,18 @@ export class RecordStore {
     if (!Number.isInteger(wave) || wave < WAVE_LIMITS.min || wave > WAVE_LIMITS.max) return null;
     if (wave <= this.current.bestWave) return null;
 
-    this.current = { bestWave: wave, achievedAt: this.now().toISOString() };
+    this.current = { ...this.current, bestWave: wave, achievedAt: this.now().toISOString() };
+    this.save();
+    return this.snapshot();
+  }
+
+  /** Soma uma vitória ou uma derrota e grava. Retorna o estado atualizado. */
+  recordRun(outcome: RunOutcome): RecordSnapshot {
+    this.current = {
+      ...this.current,
+      wins: this.current.wins + (outcome === "victory" ? 1 : 0),
+      defeats: this.current.defeats + (outcome === "defeat" ? 1 : 0),
+    };
     this.save();
     return this.snapshot();
   }
@@ -58,7 +74,9 @@ export class RecordStore {
 
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (isValidRecord(parsed)) return { ...parsed };
+      if (isValidRecord(parsed)) {
+        return { ...parsed, wins: counter(parsed.wins), defeats: counter(parsed.defeats) };
+      }
     } catch {
       // Tratado abaixo: arquivo corrompido não deve impedir o jogo de iniciar.
     }

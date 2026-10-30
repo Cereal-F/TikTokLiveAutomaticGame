@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GameSession } from "../../src/game/core/GameSession.js";
-import { BOSS, LIVE_EFFECTS, PLAYER, WAVES } from "../../src/game/core/constants.js";
+import { GameSession, type SessionEvent } from "../../src/game/core/GameSession.js";
+import { BOSS, CAMPAIGN, LIVE_EFFECTS, PLAYER, WAVES } from "../../src/game/core/constants.js";
 import { GIFT_POWERS } from "../../src/game/core/powers.js";
 import { killPoints, waveConfig } from "../../src/game/core/waves.js";
 import { commentEvent, giftEvent, likeEvent } from "../helpers/events.js";
@@ -133,7 +133,7 @@ describe("GameSession: curtidas e comentários", () => {
     expect(events).toEqual([]);
   });
 
-  it("a cada 20 curtidas acumuladas cura 10 de vida", () => {
+  it("a cada N curtidas acumuladas cura M de vida (constantes de LIVE_EFFECTS)", () => {
     const session = new GameSession();
     session.start();
     session.damagePlayer(50);
@@ -142,11 +142,20 @@ describe("GameSession: curtidas e comentários", () => {
     expect(feedback.map((f) => f.tone)).toEqual(["score", "heal"]);
   });
 
+  it("poucas curtidas não curam: 10 curtidas não dão nem a primeira cura", () => {
+    const session = new GameSession();
+    session.start();
+    session.damagePlayer(50);
+    session.applyLiveEvent(likeEvent("l1", "u1", 10));
+    expect(session.hp).toBe(50);
+  });
+
   it("guarda o progresso de curtidas que não completou uma cura", () => {
     const session = new GameSession();
     session.start();
     session.damagePlayer(50);
-    session.applyLiveEvent(likeEvent("l1", "u1", 15));
+    const almost = LIVE_EFFECTS.likesPerHeal - 5;
+    session.applyLiveEvent(likeEvent("l1", "u1", almost));
     expect(session.hp).toBe(50);
     session.applyLiveEvent(likeEvent("l2", "u2", 5));
     expect(session.hp).toBe(50 + LIVE_EFFECTS.likeHealAmount);
@@ -156,7 +165,7 @@ describe("GameSession: curtidas e comentários", () => {
     const session = new GameSession();
     session.start();
     session.damagePlayer(80);
-    const { feedback } = session.applyLiveEvent(likeEvent("l1", "u1", 40));
+    const { feedback } = session.applyLiveEvent(likeEvent("l1", "u1", 2 * LIVE_EFFECTS.likesPerHeal));
     expect(session.hp).toBe(20 + 2 * LIVE_EFFECTS.likeHealAmount);
     expect(feedback.filter((f) => f.tone === "heal")).toHaveLength(2);
   });
@@ -214,8 +223,8 @@ describe("GameSession: presentes e poderes", () => {
     session.damagePlayer(60);
     const { events } = session.applyLiveEvent(giftEvent("g1", "u1", "Foguete", 500));
     expect(events).toEqual([{ type: "power", power: GIFT_POWERS[3] }]);
-    // 100 - 60 de dano + 25 de cura da tempestade = 65.
-    expect(session.hp).toBe(65);
+    // 100 - 60 de dano + 30 de cura da tempestade = 70.
+    expect(session.hp).toBe(70);
     expect(session.turboActive).toBe(true);
   });
 
@@ -328,5 +337,25 @@ describe("GameSession: chefes", () => {
     session.registerKill(true);
     expect(session.score - scoreBefore).toBe(killPoints(5) * BOSS.pointsMultiplier);
     expect(session.kills).toBe(killsBefore + 1);
+  });
+});
+
+describe("GameSession: vitória", () => {
+  it("derrotar o chefe da fase 20 vence a campanha e congela a partida", () => {
+    const session = new GameSession();
+    session.start();
+    let last: SessionEvent[] = [];
+    for (let wave = 1; wave <= CAMPAIGN.levels; wave += 1) {
+      const config = session.waveSettings;
+      session.update(1_000_000);
+      for (let i = 0; i < config.enemyCount; i += 1) {
+        last = session.registerKill(config.isBoss && i === 0);
+      }
+      if (wave < CAMPAIGN.levels) session.update(WAVES.intermissionMs + 100);
+    }
+    expect(last.some((event) => event.type === "victory")).toBe(true);
+    expect(session.phase).toBe("victory");
+    expect(session.update(1_000)).toEqual([]);
+    expect(session.damagePlayer(50)).toEqual([]);
   });
 });

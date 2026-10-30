@@ -1,6 +1,6 @@
 import { defaultSocketUrl, ReconnectingSocket, type ConnectionState } from "../../client/net/ReconnectingSocket.js";
 import type { LiveEvent } from "../../shared/events.js";
-import type { ClientMessage, LeaderboardEntry, RecordSnapshot, ServerMessage } from "../../shared/protocol.js";
+import type { ClientMessage, LeaderboardEntry, RecordSnapshot, RunOutcome, ServerMessage } from "../../shared/protocol.js";
 import { LiveEventInbox } from "../core/LiveEventInbox.js";
 
 /** Atualizações vindas do servidor que a cena copia para a HUD uma vez por quadro. */
@@ -18,6 +18,8 @@ export class LiveFeed {
   private socket: ReconnectingSocket | null = null;
   private pendingUpdates: FeedUpdates = {};
   private reportedWave = 0;
+  /** Resultados de partidas ainda não confirmados como enviados (ficam aqui se a conexão cair). */
+  private readonly unsentOutcomes: RunOutcome[] = [];
 
   constructor(private readonly onConnectionChange: (state: ConnectionState) => void) {}
 
@@ -28,8 +30,9 @@ export class LiveFeed {
       role: "game",
       onMessage: (message: ServerMessage) => this.handleMessage(message),
       onState: (state: ConnectionState) => {
-        // Ao (re)conectar, reenvia a maior onda para o servidor não perder um recorde feito offline.
+        // Ao (re)conectar, reenvia a maior onda e os resultados pendentes para nada se perder offline.
         if (state === "open" && this.reportedWave > 0) this.send({ type: "game:waveReached", wave: this.reportedWave });
+        if (state === "open") this.flushOutcomes();
         this.onConnectionChange(state);
       },
     });
@@ -48,6 +51,12 @@ export class LiveFeed {
     this.send({ type: "game:waveReached", wave });
   }
 
+  /** Informa o fim de uma partida (vitória ou derrota). Se a conexão estiver fora, envia ao reconectar. */
+  reportRunEnded(outcome: RunOutcome): void {
+    this.unsentOutcomes.push(outcome);
+    this.flushOutcomes();
+  }
+
   drain(): LiveEvent[] {
     return this.inbox.drain();
   }
@@ -59,8 +68,17 @@ export class LiveFeed {
     return updates;
   }
 
-  private send(message: ClientMessage): void {
-    this.socket?.send(message);
+  private send(message: ClientMessage): boolean {
+    return this.socket?.send(message) ?? false;
+  }
+
+  /** Envia os resultados na ordem; para no primeiro que não sair, para tentar de novo depois. */
+  private flushOutcomes(): void {
+    while (this.unsentOutcomes.length > 0) {
+      const outcome = this.unsentOutcomes[0]!;
+      if (!this.send({ type: "game:runEnded", outcome })) return;
+      this.unsentOutcomes.shift();
+    }
   }
 
   private handleMessage(message: ServerMessage): void {

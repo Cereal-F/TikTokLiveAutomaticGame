@@ -21,13 +21,13 @@ afterEach(() => {
 describe("RecordStore", () => {
   it("começa sem recorde quando o arquivo ainda não existe", () => {
     const store = new RecordStore(file, fixedNow, silent);
-    expect(store.snapshot()).toEqual({ bestWave: 0, achievedAt: null });
+    expect(store.snapshot()).toEqual({ bestWave: 0, achievedAt: null, wins: 0, defeats: 0 });
   });
 
   it("guarda uma onda maior que o recorde e grava em arquivo", () => {
     const store = new RecordStore(file, fixedNow, silent);
     const updated = store.update(7);
-    expect(updated).toEqual({ bestWave: 7, achievedAt: "2026-10-29T03:00:00.000Z" });
+    expect(updated).toEqual({ bestWave: 7, achievedAt: "2026-10-29T03:00:00.000Z", wins: 0, defeats: 0 });
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(updated);
   });
 
@@ -43,6 +43,24 @@ describe("RecordStore", () => {
     new RecordStore(file, fixedNow, silent).update(12);
     const reloaded = new RecordStore(file, fixedNow, silent);
     expect(reloaded.snapshot().bestWave).toBe(12);
+  });
+
+  it("soma vitórias e derrotas e mantém o recorde", () => {
+    const store = new RecordStore(file, fixedNow, silent);
+    store.update(9);
+    store.recordRun("defeat");
+    store.recordRun("defeat");
+    const after = store.recordRun("victory");
+    expect(after).toEqual({ bestWave: 9, achievedAt: "2026-10-29T03:00:00.000Z", wins: 1, defeats: 2 });
+    const reloaded = new RecordStore(file, fixedNow, silent).snapshot();
+    expect(reloaded.wins).toBe(1);
+    expect(reloaded.defeats).toBe(2);
+  });
+
+  it("arquivo antigo, sem contadores, é lido com zero vitórias e derrotas", () => {
+    writeFileSync(path.join(dir, "old.json"), JSON.stringify({ bestWave: 4, achievedAt: null }));
+    const store = new RecordStore(path.join(dir, "old.json"), fixedNow, silent);
+    expect(store.snapshot()).toEqual({ bestWave: 4, achievedAt: null, wins: 0, defeats: 0 });
   });
 
   it("ignora ondas inválidas", () => {
@@ -65,7 +83,7 @@ describe("RecordStore", () => {
   it("valores fora do formato no arquivo são descartados", () => {
     writeFileSync(path.join(dir, "shape.json"), JSON.stringify({ bestWave: "muito", achievedAt: 5 }));
     const store = new RecordStore(path.join(dir, "shape.json"), fixedNow, silent);
-    expect(store.snapshot()).toEqual({ bestWave: 0, achievedAt: null });
+    expect(store.snapshot()).toEqual({ bestWave: 0, achievedAt: null, wins: 0, defeats: 0 });
   });
 
   it("não deixa arquivo temporário para trás após salvar", () => {

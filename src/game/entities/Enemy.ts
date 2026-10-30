@@ -1,6 +1,16 @@
 import type Phaser from "phaser";
+import type { BossDesign } from "../core/bosses.js";
+import { ENEMY_TYPES } from "../core/constants.js";
+import { BossBrain, ChargerBrain, ShooterBrain, type Volley } from "../core/enemyBehavior.js";
 import { chaseDirection } from "../core/enemyMovement.js";
-import type { Point } from "../core/targeting.js";
+import { directionTo, type Point } from "../core/targeting.js";
+
+/** Como o inimigo se comporta. "chase" persegue; os demais têm um cérebro próprio. */
+export type EnemyBrainSpec =
+  | { kind: "chase" }
+  | { kind: "shooter" }
+  | { kind: "charger" }
+  | { kind: "boss"; design: BossDesign };
 
 /** Atributos de um inimigo comum ou de um chefe, vindos da configuração da onda. */
 export interface EnemySpec {
@@ -9,12 +19,30 @@ export interface EnemySpec {
   radius: number;
   contactDamage: number;
   isBoss: boolean;
+  /** Textura do Phaser usada no desenho. */
+  texture: string;
+  brain: EnemyBrainSpec;
 }
 
 const BAR_WIDTH = 64;
 const BAR_HEIGHT = 6;
 
-/** Inimigo que persegue o jogador. O chefe mostra uma barra de vida acima dele. */
+type Brain = ShooterBrain | ChargerBrain | BossBrain | null;
+
+function createBrain(spec: EnemyBrainSpec): Brain {
+  switch (spec.kind) {
+    case "shooter":
+      return new ShooterBrain();
+    case "charger":
+      return new ChargerBrain();
+    case "boss":
+      return new BossBrain(spec.design);
+    case "chase":
+      return null;
+  }
+}
+
+/** Inimigo que age sobre o personagem. O chefe mostra uma barra de vida acima dele. */
 export class Enemy {
   readonly sprite: Phaser.GameObjects.Image;
   readonly radius: number;
@@ -23,6 +51,7 @@ export class Enemy {
   private remainingHp: number;
   private readonly maxHp: number;
   private readonly speed: number;
+  private readonly brain: Brain;
   private alive = true;
   private readonly barBack: Phaser.GameObjects.Rectangle | null = null;
   private readonly barFill: Phaser.GameObjects.Rectangle | null = null;
@@ -34,7 +63,8 @@ export class Enemy {
     this.radius = spec.radius;
     this.contactDamage = spec.contactDamage;
     this.isBoss = spec.isBoss;
-    this.sprite = scene.add.image(x, y, spec.isBoss ? "boss" : "monster").setDepth(spec.isBoss ? 6 : 5);
+    this.brain = createBrain(spec.brain);
+    this.sprite = scene.add.image(x, y, spec.texture).setDepth(spec.isBoss ? 6 : 5);
     if (spec.isBoss) {
       this.barBack = scene.add.rectangle(x, y, BAR_WIDTH, BAR_HEIGHT, 0x000000, 0.7).setDepth(20);
       this.barFill = scene.add.rectangle(x, y, BAR_WIDTH, BAR_HEIGHT, 0xf87171).setDepth(21);
@@ -59,15 +89,44 @@ export class Enemy {
   }
 
   /**
-   * Avança em direção ao alvo. `others` são as posições de todos os inimigos vivos
-   * (o próprio é ignorado pela regra de separação); eles se espalham em vez de formar um bloco.
+   * Avança um quadro em direção ao alvo e devolve os tiros disparados neste quadro.
+   * `others` são as posições de todos os inimigos vivos (a separação evita formarem um bloco).
    */
-  chase(target: Point, others: readonly Point[], dtMs: number): void {
-    if (!this.alive) return;
-    const direction = chaseDirection(this.position, target, others);
-    const step = (this.speed * dtMs) / 1000;
-    this.sprite.setPosition(this.sprite.x + direction.x * step, this.sprite.y + direction.y * step);
+  act(target: Point, others: readonly Point[], dtMs: number): Volley[] {
+    if (!this.alive) return [];
+    const self = this.position;
+    const volleys: Volley[] = [];
+    let direction: Point;
+    let speedFactor = 1;
+
+    if (this.brain instanceof ShooterBrain) {
+      const intent = this.brain.step(self, target, others, dtMs);
+      direction = intent.direction;
+      speedFactor = intent.speedFactor;
+      if (intent.fire) {
+        volleys.push({
+          directions: [directionTo(self, target)],
+          speed: ENEMY_TYPES.shooter.shotSpeed,
+          damage: ENEMY_TYPES.shooter.shotDamage,
+        });
+      }
+    } else if (this.brain instanceof ChargerBrain) {
+      const intent = this.brain.step(self, target, others, dtMs);
+      direction = intent.direction;
+      speedFactor = intent.speedFactor;
+    } else if (this.brain instanceof BossBrain) {
+      const intent = this.brain.step(self, target, others, dtMs);
+      direction = intent.direction;
+      speedFactor = intent.speedFactor;
+      volleys.push(...intent.volleys);
+    } else {
+      direction = chaseDirection(self, target, others);
+    }
+
+    const step = (this.speed * speedFactor * dtMs) / 1000;
+    this.sprite.setPosition(self.x + direction.x * step, self.y + direction.y * step);
     this.placeBar();
+    return volleys;
   }
 
   /** Aplica dano. Retorna true se o inimigo foi derrotado por este golpe. */

@@ -128,6 +128,16 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage({ type: "game:waveReached", wave: "7" }).ok).toBe(false);
   });
 
+  it("aceita o fim de partida apenas com resultado conhecido", () => {
+    expect(parseClientMessage({ type: "game:runEnded", outcome: "victory" })).toEqual({
+      ok: true,
+      value: { type: "game:runEnded", outcome: "victory" },
+    });
+    expect(parseClientMessage({ type: "game:runEnded", outcome: "defeat" }).ok).toBe(true);
+    expect(parseClientMessage({ type: "game:runEnded", outcome: "draw" }).ok).toBe(false);
+    expect(parseClientMessage({ type: "game:runEnded" }).ok).toBe(false);
+  });
+
   it("rejeita tipo de mensagem desconhecido e objetos fora do formato", () => {
     expect(parseClientMessage({ type: "shutdown" }).ok).toBe(false);
     expect(parseClientMessage(["hello"]).ok).toBe(false);

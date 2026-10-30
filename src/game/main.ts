@@ -15,7 +15,8 @@ new Phaser.Game({
   height: WORLD.height,
   backgroundColor: "#0d0f1a",
   pixelArt: true,
-  roundPixels: true,
+  // Sem arredondar a posição em pixels: com ele o personagem trepida ao se deslocar devagar.
+  roundPixels: false,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
