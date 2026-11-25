@@ -114,7 +114,8 @@ export const BERSERK = {
 
 /** Reinício automático da partida após a derrota. */
 export const RUN = {
-  restartDelayMs: 6_000,
+  /** Tempo na tela de fim de partida (com o pódio) antes da próxima partida começar. */
+  restartDelayMs: 10_000,
 } as const;
 
 /**

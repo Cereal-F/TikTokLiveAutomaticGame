@@ -20,10 +20,15 @@ import { LiveFeed } from "../net/LiveFeed.js";
 import { Hud, type RecordView } from "../ui/Hud.js";
 import { SpotlightView } from "../ui/SpotlightView.js";
 import { ChapterTransition } from "../ui/ChapterTransition.js";
+import { burst, flash, shockwave } from "../ui/effects.js";
+import { type Chapter } from "../core/scenery.js";
 import { SCENE_KEYS } from "./keys.js";
 import type { GameOverData } from "./GameOverScene.js";
 
 const EMPTY_PODIUM: Podium = { basis: "diamonds", entries: [] };
+
+/** Cor de cada nível de presente, igual à da faixa de avisos. */
+const TIER_COLORS: Record<number, number> = { 1: 0xb36bff, 2: 0x67e8f9, 3: 0xff9f43, 4: 0xff5e7e };
 
 /** Tamanho máximo do anel visual de um poder de tela inteira (o dano continua valendo para toda a tela). */
 const MAX_RING_RADIUS = 900;
@@ -59,6 +64,10 @@ export class ArenaScene extends Phaser.Scene {
   private podium: Podium = EMPTY_PODIUM;
   private floor: Phaser.GameObjects.TileSprite | null = null;
   private chapterIndex = 0;
+  /** Cor do capítulo atual: tinge as explosões de inimigos comuns. */
+  private chapterColor = 0x3a7bff;
+  /** Aura do personagem (escudo, fúria e turbo), redesenhada a cada quadro. */
+  private aura: Phaser.GameObjects.Graphics | null = null;
   /** Verdadeiro durante a troca de capítulo: o jogo para e a tela mostra a transição. */
   private transitioning = false;
   private chapterTransition: ChapterTransition | null = null;
@@ -88,6 +97,8 @@ export class ArenaScene extends Phaser.Scene {
 
     this.floor = this.add.tileSprite(0, 0, WORLD.width, WORLD.height, "floor").setOrigin(0).setDepth(0);
     this.chapterTransition = new ChapterTransition(this);
+    this.aura = this.add.graphics().setDepth(6);
+    this.applyChapter(chapterForWave(1));
     this.player = new Player(this, WORLD.width / 2, WORLD.height / 2);
     this.hud = new Hud(this);
     this.showRecord();
@@ -151,6 +162,7 @@ export class ArenaScene extends Phaser.Scene {
     this.updateEnemyShots(dt);
     if (this.ended) return;
     this.updateSpotlight();
+    this.updateAura();
 
     this.hud.update({
       hp: this.session.hp,
@@ -200,6 +212,7 @@ export class ArenaScene extends Phaser.Scene {
     if (outcome.spotlight) this.spotlights.push(outcome.spotlight);
     if (event.kind === "gift") {
       const power = powerForGift(event.diamonds);
+      if (power) this.giftFlare(power);
       const suffix = power ? ` > ${power.label}` : "";
       this.hud.pushGift({
         text: `${event.userName}: ${event.giftName} (${event.diamonds})${suffix}`,
@@ -253,9 +266,7 @@ export class ArenaScene extends Phaser.Scene {
       this.enemyShots = [];
       for (const projectile of this.projectiles) projectile.destroy();
       this.projectiles = [];
-      const chapter = chapterForWave(this.session.wave);
-      this.floor?.setTexture(chapter.floorKey);
-      this.chapterIndex = chapter.index;
+      this.applyChapter(chapterForWave(this.session.wave));
     }
     this.handleSessionEvents(events);
   }
@@ -273,10 +284,7 @@ export class ArenaScene extends Phaser.Scene {
     this.enemyShots = [];
     this.chapterTransition.play(
       chapter,
-      () => {
-        this.floor?.setTexture(chapter.floorKey);
-        this.chapterIndex = chapter.index;
-      },
+      () => this.applyChapter(chapter),
       () => {
         this.transitioning = false;
       },
@@ -307,6 +315,62 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   /** Dano em área: atinge todos os inimigos vivos dentro do raio e mostra um anel que se desfaz. */
+  /** Troca o cenário e a cor do capítulo. Chamado no escuro da transição, ou direto ao pular de onda. */
+  private applyChapter(chapter: Chapter): void {
+    this.floor?.setTexture(chapter.floorKey);
+    this.chapterIndex = chapter.index;
+    this.chapterColor = chapter.color;
+  }
+
+  /** Inimigo derrotado: explosão (maior no chefe) e a contagem da sessão. */
+  private onEnemyDefeated(enemy: Enemy): void {
+    this.explodeEnemy(enemy.position, enemy.isBoss);
+    this.handleSessionEvents(this.session.registerKill(enemy.isBoss));
+  }
+
+  private explodeEnemy(at: Point, boss: boolean): void {
+    if (boss) {
+      flash(this, 0xffffff, 0.55, 320);
+      shockwave(this, at.x, at.y, 170, 0xffd23f, 520, 8);
+      shockwave(this, at.x, at.y, 320, this.chapterColor, 820, 5);
+      burst(this, at.x, at.y, { color: 0xffd23f, count: 42, speed: 380, size: 9, lifeMs: 950 });
+      burst(this, at.x, at.y, { color: this.chapterColor, count: 26, speed: 280, size: 6, lifeMs: 750 });
+      this.cameras.main.shake(380, 0.012);
+      return;
+    }
+    shockwave(this, at.x, at.y, 46, this.chapterColor, 260, 3);
+    burst(this, at.x, at.y, { color: this.chapterColor, count: 10, speed: 150, size: 5, lifeMs: 420 });
+  }
+
+  /** Presente que ativa um poder: anel e pedaços na cor do nível, mais forte nos níveis altos. */
+  private giftFlare(power: GiftPower): void {
+    const tier = giftTier(power);
+    const color = TIER_COLORS[tier] ?? TIER_COLORS[1]!;
+    const at = this.player.position;
+    shockwave(this, at.x, at.y, 70 + tier * 25, color, 450, 5);
+    burst(this, at.x, at.y, { color, count: 10 + tier * 4, speed: 140 + tier * 30, size: 5, lifeMs: 600 });
+    if (tier >= 3) flash(this, color, 0.25, 350);
+    if (tier >= 4) this.cameras.main.shake(300, 0.006);
+  }
+
+  /** Aura do personagem enquanto um efeito dura: escudo (ciano), fúria (vermelho) e turbo (roxo). */
+  private updateAura(): void {
+    const graphics = this.aura;
+    if (!graphics) return;
+    graphics.clear();
+    const at = this.player.position;
+    const pulse = 0.5 + 0.5 * Math.sin(this.time.now / 120);
+    if (this.session.shieldActive) {
+      graphics.lineStyle(4, 0x67e8f9, 0.5 + 0.4 * pulse).strokeCircle(at.x, at.y, 34 + pulse * 4);
+    }
+    if (this.session.berserkActive) {
+      graphics.lineStyle(5, 0xff5e7e, 0.45 + 0.4 * pulse).strokeCircle(at.x, at.y, 30 + pulse * 6);
+    }
+    if (this.session.turboActive) {
+      graphics.lineStyle(3, 0xb36bff, 0.5).strokeCircle(at.x, at.y, 26 + pulse * 3);
+    }
+  }
+
   private detonate(center: Point, radius: number, damage: number, color: number): void {
     const ringRadius = Math.min(radius, MAX_RING_RADIUS);
     const ring = this.add.circle(center.x, center.y, ringRadius, color, 0.25).setDepth(7);
@@ -315,7 +379,7 @@ export class ArenaScene extends Phaser.Scene {
     const targets = this.aliveEnemies().filter((enemy) => distance(enemy.position, center) <= radius);
     for (const enemy of targets) {
       if (enemy.takeHit(damage)) {
-        this.handleSessionEvents(this.session.registerKill(enemy.isBoss));
+        this.onEnemyDefeated(enemy);
       }
     }
   }
@@ -358,7 +422,7 @@ export class ArenaScene extends Phaser.Scene {
       if (hit) {
         const defeated = hit.takeHit(projectile.damage);
         projectile.destroy();
-        if (defeated) this.handleSessionEvents(this.session.registerKill(hit.isBoss));
+        if (defeated) this.onEnemyDefeated(hit);
         continue;
       }
       remaining.push(projectile);
