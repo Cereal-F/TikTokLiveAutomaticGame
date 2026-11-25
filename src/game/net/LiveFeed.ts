@@ -1,6 +1,14 @@
 import { defaultSocketUrl, ReconnectingSocket, type ConnectionState } from "../../client/net/ReconnectingSocket.js";
 import type { LiveEvent } from "../../shared/events.js";
-import type { ClientMessage, LeaderboardEntry, RecordSnapshot, RunOutcome, ServerMessage } from "../../shared/protocol.js";
+import type {
+  ClientMessage,
+  GameCommand,
+  LeaderboardEntry,
+  Podium,
+  RecordSnapshot,
+  RunOutcome,
+  ServerMessage,
+} from "../../shared/protocol.js";
 import { LiveEventInbox } from "../core/LiveEventInbox.js";
 
 /** Atualizações vindas do servidor que a cena copia para a HUD uma vez por quadro. */
@@ -9,6 +17,8 @@ export interface FeedUpdates {
   leaderboard?: LeaderboardEntry[];
   /** Maior presenteador de toda a live. */
   allTime?: LeaderboardEntry | null;
+  /** Pódio da rodada (quem mais apoiou), com fotos. */
+  podium?: Podium;
   record?: RecordSnapshot;
 }
 
@@ -25,6 +35,8 @@ export class LiveFeed {
   private readonly unsentOutcomes: RunOutcome[] = [];
   /** Verdadeiro quando o início da partida não pôde ser enviado (conexão fora). */
   private runStartPending = false;
+  /** Comandos do painel de administração (pular ou escolher onda), ainda não aplicados pela cena. */
+  private readonly commands: GameCommand[] = [];
 
   constructor(private readonly onConnectionChange: (state: ConnectionState) => void) {}
 
@@ -75,6 +87,11 @@ export class LiveFeed {
     return this.inbox.drain();
   }
 
+  /** Comandos do painel recebidos desde a última leitura. */
+  takeCommands(): GameCommand[] {
+    return this.commands.splice(0, this.commands.length);
+  }
+
   /** Retorna as atualizações pendentes (ranking e recorde) e as zera. */
   takeUpdates(): FeedUpdates {
     const updates = this.pendingUpdates;
@@ -107,9 +124,13 @@ export class LiveFeed {
       case "leaderboard":
         this.pendingUpdates.leaderboard = message.entries;
         this.pendingUpdates.allTime = message.allTime;
+        this.pendingUpdates.podium = message.podium;
         return;
       case "record":
         this.pendingUpdates.record = message.record;
+        return;
+      case "game:command":
+        this.commands.push(message.command);
         return;
       default:
         return;

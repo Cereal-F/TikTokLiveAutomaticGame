@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { SPOTLIGHT, SpotlightQueue, type Spotlight } from "../../src/game/core/spotlight.js";
 
 function like(userId: string, count: number): Spotlight {
-  return { kind: "like", userId, userName: userId, title: `+${count}`, effect: "", tier: 0, count };
+  return { kind: "like", userId, userName: userId, title: `+${count}`, effect: "", tier: 0, count, prominent: false };
 }
 
-function gift(userId: string): Spotlight {
-  return { kind: "gift", userId, userName: userId, title: "Rosa", effect: "+8 s de TURBO", tier: 1, count: 1 };
+function gift(userId: string, prominent = true): Spotlight {
+  return { kind: "gift", userId, userName: userId, title: "Rosa", effect: "+8 s de TURBO", tier: 1, count: 1, prominent };
 }
 
 describe("SpotlightQueue", () => {
@@ -37,5 +37,15 @@ describe("SpotlightQueue", () => {
     for (let i = 0; i < SPOTLIGHT.maxQueued + 2; i += 1) queue.push(gift(`u${i}`));
     expect(queue.pendingCount).toBe(SPOTLIGHT.maxQueued);
     expect(queue.tick(0)?.userId).toBe("u2");
+  });
+
+  it("presentes pequenos e curtidas ficam menos tempo na tela que presentes grandes", () => {
+    const queue = new SpotlightQueue();
+    queue.push(gift("ana", false));
+    queue.push(gift("bia", true));
+    expect(queue.tick(0)?.userId).toBe("ana");
+    expect(queue.tick(SPOTLIGHT.smallGiftMs)?.userId).toBe("bia");
+    expect(SPOTLIGHT.smallGiftMs).toBeLessThan(SPOTLIGHT.giftMs);
+    expect(SPOTLIGHT.likeMs).toBeLessThanOrEqual(SPOTLIGHT.smallGiftMs);
   });
 });

@@ -78,6 +78,7 @@ function handleServerMessage(message: ServerMessage): void {
       return;
     case "record":
     case "leaderboard":
+    case "game:command":
       // O painel não exibe recorde nem ranking; o jogo mostra essas informações.
       return;
   }
@@ -111,6 +112,25 @@ element<HTMLButtonElement>("resetLeaderboard").addEventListener("click", () => {
   const sent = socket.send({ type: "admin:resetLeaderboard" });
   if (sent) appendLog("top 3 de presentes zerado", "like");
   else appendLog("sem conexão com o servidor; ranking não zerado", "error");
+});
+
+const waveInput = element<HTMLInputElement>("waveInput");
+
+element<HTMLButtonElement>("skipWave").addEventListener("click", () => {
+  const sent = socket.send({ type: "admin:skipWave" });
+  if (sent) appendLog("pulando para a próxima onda", "like");
+  else appendLog("sem conexão com o servidor; onda não pulada", "error");
+});
+
+element<HTMLButtonElement>("goToWave").addEventListener("click", () => {
+  const wave = Math.floor(Number(waveInput.value));
+  if (!Number.isInteger(wave) || wave < 1 || wave > 20) {
+    appendLog("escolha uma onda entre 1 e 20", "error");
+    return;
+  }
+  const sent = socket.send({ type: "admin:goToWave", wave });
+  if (sent) appendLog(`indo para a onda ${wave}`, "like");
+  else appendLog("sem conexão com o servidor; onda não alterada", "error");
 });
 
 intervalRange.addEventListener("input", () => {

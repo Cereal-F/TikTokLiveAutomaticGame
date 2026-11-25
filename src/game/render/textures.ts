@@ -208,17 +208,36 @@ function drawPixelSprite(
   graphics.destroy();
 }
 
-function drawFloorTile(scene: Phaser.Scene, key: string): void {
+/** Cores de um azulejo de chão: fundo, linhas da grade, pontos e detalhe de destaque. */
+interface FloorPalette {
+  base: number;
+  line: number;
+  speck: number;
+  accent: number;
+}
+
+/** Um chão por cenário (capítulo). "floor" é o do primeiro capítulo. */
+const FLOORS: Record<string, FloorPalette> = {
+  floor: { base: 0x151a2b, line: 0x1d2440, speck: 0x10142a, accent: 0x1f2f66 },
+  "floor-ruins": { base: 0x1a1126, line: 0x2c1d44, speck: 0x120a1d, accent: 0x4c2a7a },
+  "floor-magma": { base: 0x24110a, line: 0x42200f, speck: 0x180b06, accent: 0x9a3a10 },
+  "floor-steel": { base: 0x111c1d, line: 0x1f3a3b, speck: 0x0a1414, accent: 0x18625f },
+};
+
+function drawFloorTile(scene: Phaser.Scene, key: string, palette: FloorPalette): void {
   const size = 32;
   const graphics = scene.make.graphics({ x: 0, y: 0 }, false);
-  graphics.fillStyle(0x151a2b, 1);
+  graphics.fillStyle(palette.base, 1);
   graphics.fillRect(0, 0, size, size);
-  graphics.fillStyle(0x1d2440, 1);
+  graphics.fillStyle(palette.line, 1);
   graphics.fillRect(0, 0, size, 2);
   graphics.fillRect(0, 0, 2, size);
-  graphics.fillStyle(0x10142a, 1);
+  graphics.fillStyle(palette.speck, 1);
   graphics.fillRect(8, 8, 4, 4);
   graphics.fillRect(20, 22, 4, 4);
+  graphics.fillStyle(palette.accent, 1);
+  graphics.fillRect(4, 24, 4, 4);
+  graphics.fillRect(24, 4, 4, 4);
   graphics.generateTexture(key, size, size);
   graphics.destroy();
 }
@@ -242,5 +261,7 @@ export function createPixelTextures(scene: Phaser.Scene): void {
   for (const [key, rows, scale] of sprites) {
     if (!scene.textures.exists(key)) drawPixelSprite(scene, key, rows, scale);
   }
-  if (!scene.textures.exists("floor")) drawFloorTile(scene, "floor");
+  for (const [key, palette] of Object.entries(FLOORS)) {
+    if (!scene.textures.exists(key)) drawFloorTile(scene, key, palette);
+  }
 }

@@ -56,9 +56,18 @@ export class ClientHub {
   }
 
   broadcast(message: ServerMessage): void {
+    this.sendTo((role) => role !== null, message);
+  }
+
+  /** Envia apenas aos clientes que se identificaram com o papel dado. */
+  broadcastToRole(role: ClientRole, message: ServerMessage): void {
+    this.sendTo((clientRole) => clientRole === role, message);
+  }
+
+  private sendTo(accept: (role: ClientRole | null) => boolean, message: ServerMessage): void {
     const payload = JSON.stringify(message);
     for (const state of this.clients.values()) {
-      if (state.role === null || state.socket.readyState !== WebSocket.OPEN) continue;
+      if (!accept(state.role) || state.socket.readyState !== WebSocket.OPEN) continue;
       this.safeSend(state.socket, payload);
     }
   }

@@ -49,6 +49,8 @@
       .auto { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
       .auto label { display: flex; align-items: center; gap: 8px; }
       input[type="range"] { width: 100%; }
+      .wave-pick { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 14px; }
+      .wave-pick input { width: 80px; background: #232945; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 14px; }
       .muted { color: var(--muted); font-size: 13px; }
       .log {
         height: 520px;
@@ -93,6 +95,17 @@
         <div class="buttons" style="margin-top: 10px">
           <button id="resetLeaderboard">Zerar top 3 de presentes</button>
         </div>
+
+        <h2 style="margin-top: 18px">Ondas (testes)</h2>
+        <div class="buttons">
+          <button id="skipWave">Pular onda</button>
+          <button id="goToWave">Ir para onda</button>
+        </div>
+        <label class="wave-pick">
+          Onda:
+          <input type="number" id="waveInput" min="1" max="20" value="1" />
+          <span class="muted">de 1 a 20 (o chefe final é a 20)</span>
+        </label>
 
         <div class="auto">
           <label><input type="checkbox" id="autoToggle" /> Modo automático</label>

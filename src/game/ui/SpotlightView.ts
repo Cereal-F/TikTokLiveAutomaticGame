@@ -1,8 +1,9 @@
 import type Phaser from "phaser";
 import { WORLD } from "../core/constants.js";
 import type { Spotlight } from "../core/spotlight.js";
+import { AvatarView } from "./avatars.js";
 
-/** Cor do destaque por nível do presente (0 = curtidas). */
+/** Cor de cada nível do presente (0 = curtidas). */
 const TIER_COLORS: Record<number, number> = {
   0: 0x4ade80,
   1: 0xb36bff,
@@ -11,124 +12,158 @@ const TIER_COLORS: Record<number, number> = {
   4: 0xff5e7e,
 };
 
-const PANEL = { width: 640, height: 200, top: 470 } as const;
-const AVATAR = { radius: 64, offsetX: -240 } as const;
+const TIER_TEXT: Record<number, string> = {
+  0: "#4ade80",
+  1: "#b36bff",
+  2: "#67e8f9",
+  3: "#ff9f43",
+  4: "#ff5e7e",
+};
+
 const DEPTH = 150;
+const FADE_MS = 220;
 
-/** Objeto visual que some e aparece, como textos e retângulos. */
-interface Toggleable {
-  setVisible(value: boolean): unknown;
-  setAlpha(value: number): unknown;
+/** Geometria de um aviso: grande no centro, ou compacto no lado direito. */
+interface Layout {
+  prominent: boolean;
+  cx: number;
+  cy: number;
+  width: number;
+  height: number;
+  radius: number;
+  avatarRadius: number;
+  avatarX: number;
+  textX: number;
 }
 
-/** Chave de textura estável para uma URL de foto. */
-function avatarKey(url: string): string {
-  let hash = 0;
-  for (let i = 0; i < url.length; i += 1) hash = (hash * 31 + url.charCodeAt(i)) | 0;
-  return `avatar:${hash >>> 0}`;
+function layoutFor(prominent: boolean): Layout {
+  if (prominent) {
+    const width = 620;
+    const height = 168;
+    const cx = WORLD.width / 2;
+    const cy = 560;
+    const avatarRadius = 50;
+    const avatarX = cx - width / 2 + 24 + avatarRadius;
+    return { prominent, cx, cy, width, height, radius: 26, avatarRadius, avatarX, textX: avatarX + avatarRadius + 28 };
+  }
+  const width = 420;
+  const height = 72;
+  const cx = WORLD.width - 24 - width / 2;
+  const cy = 740;
+  const avatarRadius = 22;
+  const avatarX = cx - width / 2 + 14 + avatarRadius;
+  return { prominent, cx, cy, width, height, radius: 16, avatarRadius, avatarX, textX: avatarX + avatarRadius + 14 };
 }
 
-function initialOf(name: string): string {
-  const first = [...name.trim()][0];
-  return first ? first.toUpperCase() : "?";
+/** Corta o texto para caber na largura do aviso, com reticências. */
+function clip(text: string, maxChars: number): string {
+  const chars = [...text];
+  return chars.length > maxChars ? `${chars.slice(0, maxChars - 1).join("")}…` : text;
 }
 
 /**
- * Aviso no meio da tela: foto de quem enviou ou curtiu, o @, o que enviou e o efeito recebido.
+ * Aviso de quem enviou um presente ou curtiu. Presentes de valor alto aparecem grandes no centro;
+ * curtidas e presentes pequenos, numa faixa compacta do lado direito, para não tirar a atenção do jogo.
  * A foto carrega em segundo plano; enquanto isso, ou se falhar, aparece a inicial do nome.
  */
 export class SpotlightView {
-  private readonly parts: Toggleable[] = [];
-  private readonly background: Phaser.GameObjects.Rectangle;
-  private readonly avatarBack: Phaser.GameObjects.Arc;
-  private readonly initialText: Phaser.GameObjects.Text;
-  private readonly avatarImage: Phaser.GameObjects.Image;
+  private readonly panel: Phaser.GameObjects.Graphics;
+  private readonly avatar: AvatarView;
   private readonly handleText: Phaser.GameObjects.Text;
   private readonly titleText: Phaser.GameObjects.Text;
   private readonly effectText: Phaser.GameObjects.Text;
-  private currentUrl: string | null = null;
-  private readonly requested = new Set<string>();
-  private readonly onLoaded = (): void => this.applyLoadedAvatar();
+  private effectWanted = false;
+  private readonly fade = { value: 0 };
+  private readonly onLoaded = (): void => this.avatar.refresh();
 
   constructor(private readonly scene: Phaser.Scene) {
-    const cx = WORLD.width / 2;
-    const cy = PANEL.top + PANEL.height / 2;
-    const avatarX = cx + AVATAR.offsetX;
-
-    this.background = scene.add.rectangle(cx, cy, PANEL.width, PANEL.height, 0x000000, 0.72).setDepth(DEPTH);
-    this.avatarBack = scene.add.circle(avatarX, cy, AVATAR.radius, 0x1b2340).setDepth(DEPTH + 1);
-    this.initialText = scene.add
-      .text(avatarX, cy, "", { fontFamily: "monospace", fontSize: "56px", color: "#0b0b12", stroke: "#ffffff", strokeThickness: 2 })
-      .setOrigin(0.5)
-      .setDepth(DEPTH + 2);
-    // A foto fica invisível até carregar: nunca aparece a textura padrão do Phaser.
-    this.avatarImage = scene.add.image(avatarX, cy, "__DEFAULT").setVisible(false).setDepth(DEPTH + 2);
-    const mask = scene.make.graphics({ x: 0, y: 0 }, false).fillStyle(0xffffff).fillCircle(avatarX, cy, AVATAR.radius);
-    this.avatarImage.setMask(mask.createGeometryMask());
-
-    const textX = avatarX + AVATAR.radius + 28;
     const label = { fontFamily: "monospace", stroke: "#000000", strokeThickness: 4 } as const;
-    this.handleText = scene.add.text(textX, cy - 56, "", { ...label, fontSize: "32px", color: "#ffd23f" }).setOrigin(0, 0.5).setDepth(DEPTH + 2);
-    this.titleText = scene.add.text(textX, cy - 4, "", { ...label, fontSize: "28px", color: "#e8ecff" }).setOrigin(0, 0.5).setDepth(DEPTH + 2);
-    this.effectText = scene.add.text(textX, cy + 48, "", { ...label, fontSize: "24px", color: "#b36bff" }).setOrigin(0, 0.5).setDepth(DEPTH + 2);
-
-    this.parts.push(this.background, this.avatarBack, this.initialText, this.handleText, this.titleText, this.effectText);
+    this.panel = scene.add.graphics().setDepth(DEPTH);
+    this.avatar = new AvatarView(scene, DEPTH + 1);
+    this.handleText = scene.add.text(0, 0, "", label).setOrigin(0, 0.5).setDepth(DEPTH + 2);
+    this.titleText = scene.add.text(0, 0, "", label).setOrigin(0, 0.5).setDepth(DEPTH + 2);
+    this.effectText = scene.add.text(0, 0, "", label).setOrigin(0, 0.5).setDepth(DEPTH + 2);
     this.hide();
     scene.load.on("complete", this.onLoaded);
   }
 
-  /** Remove o ouvinte do carregador ao encerrar a cena. */
+  /** Remove o ouvinte do carregador e a animação ao encerrar a cena. */
   destroy(): void {
     this.scene.load.off("complete", this.onLoaded);
+    this.scene.tweens.killTweensOf(this.fade);
   }
 
   show(item: Spotlight): void {
+    const layout = layoutFor(item.prominent);
     const color = TIER_COLORS[item.tier] ?? TIER_COLORS[0]!;
-    this.background.setStrokeStyle(4, color);
-    this.avatarBack.setFillStyle(color);
-    this.initialText.setText(initialOf(item.userName || item.userId));
-    this.handleText.setText(`@${item.userId}`);
-    this.titleText.setText(item.title);
-    this.effectText.setText(item.effect);
+    const textColor = TIER_TEXT[item.tier] ?? TIER_TEXT[0]!;
 
-    this.currentUrl = item.avatarUrl ?? null;
-    this.avatarImage.setVisible(false);
-    this.parts.forEach((part) => {
-      part.setVisible(true);
-      part.setAlpha(0);
-    });
-    this.effectText.setVisible(item.effect.length > 0);
-    this.scene.tweens.killTweensOf(this.parts);
-    this.scene.tweens.add({ targets: this.parts, alpha: 1, duration: 180 });
-
-    // Depois de mostrar a inicial, troca pela foto se ela já estiver carregada (ou quando carregar).
-    if (this.currentUrl) this.requestAvatar(this.currentUrl);
-    this.applyLoadedAvatar();
+    this.drawPanel(layout, color);
+    this.avatar.place(layout.avatarX, layout.cy, layout.avatarRadius, item.userName || item.userId, color, item.avatarUrl);
+    this.placeTexts(layout, item, textColor);
+    this.setVisible(true);
+    this.fadeIn();
   }
 
   hide(): void {
-    this.parts.forEach((part) => part.setVisible(false));
-    this.avatarImage.setVisible(false);
+    this.scene.tweens.killTweensOf(this.fade);
+    this.setVisible(false);
   }
 
-  private requestAvatar(url: string): void {
-    const key = avatarKey(url);
-    if (this.scene.textures.exists(key) || this.requested.has(key)) return;
-    this.requested.add(key);
-    try {
-      this.scene.load.setCORS("anonymous");
-      this.scene.load.image(key, url);
-      this.scene.load.start();
-    } catch {
-      // Sem foto, o aviso continua com a inicial do nome.
+  private drawPanel(layout: Layout, color: number): void {
+    const left = layout.cx - layout.width / 2;
+    const top = layout.cy - layout.height / 2;
+    this.panel
+      .clear()
+      .fillStyle(0x0a0c18, layout.prominent ? 0.92 : 0.8)
+      .fillRoundedRect(left, top, layout.width, layout.height, layout.radius)
+      .lineStyle(layout.prominent ? 3 : 2, color, 1)
+      .strokeRoundedRect(left, top, layout.width, layout.height, layout.radius);
+  }
+
+  private placeTexts(layout: Layout, item: Spotlight, textColor: string): void {
+    const { textX, cy } = layout;
+    if (layout.prominent) {
+      this.handleText.setText(clip(`@${item.userId}`, 27)).setFontSize(30).setColor(textColor).setPosition(textX, cy - 52);
+      this.titleText.setText(clip(item.title, 28)).setFontSize(28).setColor("#e8ecff").setPosition(textX, cy - 4);
+      this.effectWanted = item.effect.length > 0;
+      this.effectText.setText(clip(item.effect, 37)).setFontSize(22).setColor(textColor).setPosition(textX, cy + 44);
+      return;
     }
+    // Compacto: o @ numa linha, o que enviou e o efeito na outra.
+    this.handleText.setText(clip(`@${item.userId}`, 29)).setFontSize(20).setColor(textColor).setPosition(textX, cy - 14);
+    const detail = [item.title, item.effect].filter((part) => part.length > 0).join(" · ");
+    this.titleText.setText(clip(detail, 34)).setFontSize(17).setColor("#e8ecff").setPosition(textX, cy + 14);
+    this.effectWanted = false;
+    this.effectText.setText("");
   }
 
-  private applyLoadedAvatar(): void {
-    if (!this.currentUrl) return;
-    const key = avatarKey(this.currentUrl);
-    if (!this.scene.textures.exists(key)) return;
-    this.avatarImage.setTexture(key).setDisplaySize(AVATAR.radius * 2, AVATAR.radius * 2).setVisible(true);
-    this.initialText.setVisible(false);
+  private setVisible(value: boolean): void {
+    this.panel.setVisible(value);
+    this.avatar.setVisible(value);
+    this.handleText.setVisible(value);
+    this.titleText.setVisible(value);
+    this.effectText.setVisible(value && this.effectWanted);
+  }
+
+  private setAlpha(value: number): void {
+    this.panel.setAlpha(value);
+    this.avatar.setAlpha(value);
+    this.handleText.setAlpha(value);
+    this.titleText.setAlpha(value);
+    this.effectText.setAlpha(value);
+  }
+
+  private fadeIn(): void {
+    this.scene.tweens.killTweensOf(this.fade);
+    this.fade.value = 0;
+    this.setAlpha(0);
+    this.scene.tweens.add({
+      targets: this.fade,
+      value: 1,
+      duration: FADE_MS,
+      ease: "Quad.easeOut",
+      onUpdate: () => this.setAlpha(this.fade.value),
+    });
   }
 }

@@ -1,12 +1,18 @@
 /**
- * Avisos no meio da tela: quem enviou um presente ou curtiu, o que enviou e o efeito que ganhou.
+ * Avisos na tela: quem enviou um presente ou curtiu, o que enviou e o efeito que ganhou.
+ * Presentes de valor alto aparecem grandes no centro; curtidas e presentes menores, numa faixa compacta.
  * A fila mostra um aviso de cada vez; curtidas seguidas viram um só aviso.
  */
 
 export const SPOTLIGHT = {
+  /** Tempo de um aviso grande (presente de valor alto). */
   giftMs: 2_600,
+  /** Tempo de um aviso compacto de presente pequeno. */
+  smallGiftMs: 1_800,
   likeMs: 1_600,
   maxQueued: 4,
+  /** Diamantes totais a partir dos quais um presente ganha o aviso grande. */
+  prominentDiamonds: 20,
 } as const;
 
 export interface Spotlight {
@@ -22,14 +28,22 @@ export interface Spotlight {
   tier: number;
   /** Quantidade: unidades do presente, ou curtidas agregadas. */
   count: number;
+  /** Aviso grande no centro (presente de valor alto). Os demais são compactos. */
+  prominent: boolean;
 }
 
 export function likeTitle(count: number): string {
   return count === 1 ? "+1 curtida" : `+${count} curtidas`;
 }
 
+/** Aviso grande para presentes de `prominentDiamonds` ou mais, no total. */
+export function isProminentGift(totalDiamonds: number): boolean {
+  return totalDiamonds >= SPOTLIGHT.prominentDiamonds;
+}
+
 function durationFor(item: Spotlight): number {
-  return item.kind === "gift" ? SPOTLIGHT.giftMs : SPOTLIGHT.likeMs;
+  if (item.kind === "like") return SPOTLIGHT.likeMs;
+  return item.prominent ? SPOTLIGHT.giftMs : SPOTLIGHT.smallGiftMs;
 }
 
 /** Junta duas curtidas seguidas: soma as quantidades e mostra o espectador mais recente. */

@@ -165,6 +165,14 @@ export function parseClientMessage(raw: unknown): Result<ClientMessage> {
     case "admin:resetLeaderboard": {
       return ok({ type: "admin:resetLeaderboard" });
     }
+    case "admin:skipWave": {
+      return ok({ type: "admin:skipWave" });
+    }
+    case "admin:goToWave": {
+      const wave = readNumber(raw, "wave", { ...WAVE_LIMITS, integer: true }, "wave");
+      if (!wave.ok) return wave;
+      return ok({ type: "admin:goToWave", wave: wave.value });
+    }
     case "game:waveReached": {
       const wave = readNumber(raw, "wave", { ...WAVE_LIMITS, integer: true }, "wave");
       if (!wave.ok) return wave;

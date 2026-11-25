@@ -32,9 +32,33 @@ export interface LeaderboardEntry {
   diamonds: number;
 }
 
+/** Um espectador no pódio da rodada, com a foto para a tela de fim de partida. */
+export interface PodiumEntry {
+  /** Identificador de exibição (o @ do espectador). */
+  userId: string;
+  userName: string;
+  avatarUrl?: string;
+  /** Diamantes enviados, ou curtidas quando `basis` é "likes". */
+  score: number;
+}
+
+/**
+ * Pódio da rodada: quem mais presenteou. Se ninguém presenteou, o ranking usa curtidas.
+ * Vazio quando a rodada não teve nenhum presente nem curtida.
+ */
+export interface Podium {
+  basis: "diamonds" | "likes";
+  entries: PodiumEntry[];
+}
+
+/** Comandos de teste do painel de administração, aplicados pelo jogo entre quadros. */
+export type GameCommand = { kind: "skipWave" } | { kind: "goToWave"; wave: number };
+
 /** Mensagens enviadas pelos clientes ao servidor. */
 export type ClientMessage =
   | { type: "hello"; role: ClientRole }
+  | { type: "admin:skipWave" }
+  | { type: "admin:goToWave"; wave: number }
   | { type: "admin:simulate"; kind: LiveEventKind; count?: number; diamonds?: number }
   | { type: "admin:auto"; enabled: boolean; intervalMs?: number }
   | { type: "admin:resetLeaderboard" }
@@ -48,7 +72,8 @@ export type ServerMessage =
   | { type: "live:event"; event: LiveEvent }
   | { type: "status"; providerStatus: ProviderStatus; autoEnabled: boolean }
   | { type: "record"; record: RecordSnapshot }
-  | { type: "leaderboard"; entries: LeaderboardEntry[]; allTime: LeaderboardEntry | null }
+  | { type: "leaderboard"; entries: LeaderboardEntry[]; allTime: LeaderboardEntry | null; podium: Podium }
+  | { type: "game:command"; command: GameCommand }
   | { type: "error"; message: string };
 
 export const AUTO_INTERVAL_LIMITS = { minMs: 300, maxMs: 30_000, defaultMs: 2_000 } as const;

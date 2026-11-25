@@ -1,8 +1,8 @@
 import type { LiveEvent } from "../../shared/events.js";
-import { BERSERK, BOSS, EFFECT_CAP_MS, LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
+import { BERSERK, BOSS, CAMPAIGN, EFFECT_CAP_MS, LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
 import { effectText, giftTier, grantFor, HITKILL_DAMAGE, powerForGift, type GiftPower } from "./powers.js";
-import { likeTitle, type Spotlight } from "./spotlight.js";
-import { killPoints, waveConfig, type WaveConfig } from "./waves.js";
+import { isProminentGift, likeTitle, type Spotlight } from "./spotlight.js";
+import { isFinalWave, killPoints, waveConfig, type WaveConfig } from "./waves.js";
 
 export type SessionPhase = "playing" | "intermission" | "defeated" | "victory";
 
@@ -259,6 +259,7 @@ export class GameSession {
           effect: healed > 0 ? `Cura +${healed}` : "",
           tier: 0,
           count: event.count,
+          prominent: false,
         };
         return { feedback, events: [], spotlight };
       }
@@ -286,6 +287,7 @@ export class GameSession {
           effect: power ? effectText(power, count) : "",
           tier: power ? giftTier(power) : 0,
           count,
+          prominent: isProminentGift(event.diamonds),
         };
         if (!power || this.isOver) return { feedback, events: [], spotlight };
 
@@ -298,6 +300,28 @@ export class GameSession {
         return { feedback, events: [{ type: "power", power, count }], spotlight };
       }
     }
+  }
+
+  /**
+   * Atalho de teste (painel de administração): começa a onda `wave` sem recompensa.
+   * A onda é limitada à campanha. Não faz nada se a partida já acabou.
+   */
+  jumpToWave(wave: number): SessionEvent[] {
+    if (this.isOver) return [];
+    this.currentWave = Math.min(CAMPAIGN.levels, Math.max(1, Math.floor(wave)));
+    return this.beginWave();
+  }
+
+  /**
+   * Atalho de teste: pula para a próxima onda. Na última, pular equivale a vencer a campanha.
+   */
+  skipWave(): SessionEvent[] {
+    if (this.isOver) return [];
+    if (isFinalWave(this.currentWave)) {
+      this.currentPhase = "victory";
+      return [{ type: "victory", stats: this.stats() }];
+    }
+    return this.jumpToWave(this.currentWave + 1);
   }
 
   stats(): SessionStats {

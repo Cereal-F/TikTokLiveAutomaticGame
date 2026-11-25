@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import type { ConnectionState } from "../../client/net/ReconnectingSocket.js";
 import type { LiveEvent } from "../../shared/events.js";
-import type { RunOutcome } from "../../shared/protocol.js";
+import type { GameCommand, Podium, RunOutcome } from "../../shared/protocol.js";
 import { Autopilot } from "../core/autopilot.js";
 import { PLAYER, PROJECTILE, SHOT, SPEED, WORLD } from "../core/constants.js";
 import { GameSession, type SessionEvent, type SessionStats } from "../core/GameSession.js";
@@ -11,6 +11,7 @@ import { edgeSpawnPoint } from "../core/spawnPoints.js";
 import { distance, directionTo, findNearest, type Point } from "../core/targeting.js";
 import type { Volley } from "../core/enemyBehavior.js";
 import { commonBodyFor, isBossWave, type BossConfig, type EnemyKind, type WaveConfig } from "../core/waves.js";
+import { chapterForWave } from "../core/scenery.js";
 import { Enemy, type EnemyBrainSpec, type EnemySpec } from "../entities/Enemy.js";
 import { EnemyShot } from "../entities/EnemyShot.js";
 import { Player } from "../entities/Player.js";
@@ -18,8 +19,11 @@ import { Projectile } from "../entities/Projectile.js";
 import { LiveFeed } from "../net/LiveFeed.js";
 import { Hud, type RecordView } from "../ui/Hud.js";
 import { SpotlightView } from "../ui/SpotlightView.js";
+import { ChapterTransition } from "../ui/ChapterTransition.js";
 import { SCENE_KEYS } from "./keys.js";
 import type { GameOverData } from "./GameOverScene.js";
+
+const EMPTY_PODIUM: Podium = { basis: "diamonds", entries: [] };
 
 /** Tamanho máximo do anel visual de um poder de tela inteira (o dano continua valendo para toda a tela). */
 const MAX_RING_RADIUS = 900;
@@ -51,6 +55,13 @@ export class ArenaScene extends Phaser.Scene {
   /** Falso até o servidor enviar o primeiro recorde; a HUD mostra traços até lá. */
   private recordLoaded = false;
   private recordBeatenThisRun = false;
+  /** Pódio mais recente recebido do servidor; vai para a tela de fim de partida. */
+  private podium: Podium = EMPTY_PODIUM;
+  private floor: Phaser.GameObjects.TileSprite | null = null;
+  private chapterIndex = 0;
+  /** Verdadeiro durante a troca de capítulo: o jogo para e a tela mostra a transição. */
+  private transitioning = false;
+  private chapterTransition: ChapterTransition | null = null;
 
   constructor() {
     super(SCENE_KEYS.arena);
@@ -67,12 +78,16 @@ export class ArenaScene extends Phaser.Scene {
     this.recordBeatenThisRun = false;
     this.spotlights = new SpotlightQueue();
     this.shownSpotlight = null;
+    this.podium = EMPTY_PODIUM;
+    this.chapterIndex = 0;
+    this.transitioning = false;
 
     // Efeitos visuais (tweens e atrasos) acompanham a mesma aceleração da partida.
     this.time.timeScale = SPEED.timeScale;
     this.tweens.timeScale = SPEED.timeScale;
 
-    this.add.tileSprite(0, 0, WORLD.width, WORLD.height, "floor").setOrigin(0).setDepth(0);
+    this.floor = this.add.tileSprite(0, 0, WORLD.width, WORLD.height, "floor").setOrigin(0).setDepth(0);
+    this.chapterTransition = new ChapterTransition(this);
     this.player = new Player(this, WORLD.width / 2, WORLD.height / 2);
     this.hud = new Hud(this);
     this.showRecord();
@@ -107,6 +122,16 @@ export class ArenaScene extends Phaser.Scene {
     for (const event of this.liveFeed?.drain() ?? []) {
       this.handleLiveEvent(event);
     }
+    // Durante a troca de capítulo a partida para: a sessão, os inimigos e o personagem esperam.
+    if (this.transitioning) {
+      this.updateSpotlight();
+      return;
+    }
+    // Comandos do painel (pular ou escolher onda) valem entre quadros, depois da troca de capítulo.
+    for (const command of this.liveFeed?.takeCommands() ?? []) {
+      this.applyCommand(command);
+    }
+    if (this.ended) return;
 
     this.handleSessionEvents(this.session.update(dt));
     if (this.ended) return;
@@ -153,6 +178,7 @@ export class ArenaScene extends Phaser.Scene {
     const updates = this.liveFeed?.takeUpdates();
     if (!updates) return;
     if (updates.leaderboard) this.hud.setLeaderboard(updates.leaderboard, updates.allTime ?? null);
+    if (updates.podium) this.podium = updates.podium;
     if (updates.record) {
       this.recordLoaded = true;
       this.record = {
@@ -193,7 +219,11 @@ export class ArenaScene extends Phaser.Scene {
           this.onWaveStarted(event.wave);
           break;
         case "waveCleared":
-          this.hud.showBanner(`ONDA ${event.wave} CONCLUÍDA`);
+          if (isBossWave(event.wave)) {
+            this.beginChapterTransition(event.wave + 1);
+          } else {
+            this.hud.showBanner(`ONDA ${event.wave} CONCLUÍDA`);
+          }
           break;
         case "playerHit":
           this.player.flash();
@@ -210,6 +240,47 @@ export class ArenaScene extends Phaser.Scene {
           return;
       }
     }
+  }
+
+  /** Pular ou escolher onda (testes): a onda nova começa limpa, com o cenário do capítulo dela. */
+  private applyCommand(command: GameCommand): void {
+    const events =
+      command.kind === "skipWave" ? this.session.skipWave() : this.session.jumpToWave(command.wave);
+    if (events.some((event) => event.type === "waveStarted")) {
+      for (const enemy of this.enemies) enemy.destroy();
+      this.enemies = [];
+      for (const shot of this.enemyShots) shot.destroy();
+      this.enemyShots = [];
+      for (const projectile of this.projectiles) projectile.destroy();
+      this.projectiles = [];
+      const chapter = chapterForWave(this.session.wave);
+      this.floor?.setTexture(chapter.floorKey);
+      this.chapterIndex = chapter.index;
+    }
+    this.handleSessionEvents(events);
+  }
+
+  /**
+   * Depois de um chefe, a próxima onda pode abrir um capítulo novo: o cenário muda com uma transição.
+   * Os tiros pendentes somem para o novo capítulo começar limpo.
+   */
+  private beginChapterTransition(nextWave: number): void {
+    const chapter = chapterForWave(nextWave);
+    if (chapter.index === this.chapterIndex || !this.chapterTransition) return;
+    this.transitioning = true;
+    this.hud.showBanner("CHEFE DERROTADO!");
+    for (const shot of this.enemyShots) shot.destroy();
+    this.enemyShots = [];
+    this.chapterTransition.play(
+      chapter,
+      () => {
+        this.floor?.setTexture(chapter.floorKey);
+        this.chapterIndex = chapter.index;
+      },
+      () => {
+        this.transitioning = false;
+      },
+    );
   }
 
   private onWaveStarted(wave: number): void {
@@ -352,6 +423,7 @@ export class ArenaScene extends Phaser.Scene {
       defeats: this.record.defeats,
       bestWave: this.record.bestWave,
       newRecord: this.recordBeatenThisRun,
+      podium: this.podium,
     };
     this.scene.start(SCENE_KEYS.gameOver, data);
   }

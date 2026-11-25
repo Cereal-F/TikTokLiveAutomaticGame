@@ -1,4 +1,4 @@
-import type { LiveEvent, LiveEventKind } from "../../shared/events.js";
+import type { LikeEvent, LiveEvent, LiveEventKind } from "../../shared/events.js";
 import { parseLiveEvent } from "../validation.js";
 import { Deduplicator } from "./Deduplicator.js";
 import { LikeCounter } from "./LikeCounter.js";
@@ -12,6 +12,8 @@ export interface EventPipelineOptions {
   userRateLimits: Record<LiveEventKind, RateLimitRule>;
   /** Limite global de eventos aceitos, para proteger o jogo de rajadas. */
   globalRateLimit: RateLimitRule;
+  /** Chamado para cada curtida aceita, antes da agregação (para contar curtidas por espectador). */
+  onLike?: (event: LikeEvent) => void;
 }
 
 export type SubmitResult =
@@ -66,6 +68,7 @@ export class EventPipeline {
         userName: event.userName,
         ...(event.avatarUrl ? { avatarUrl: event.avatarUrl } : {}),
       });
+      this.options.onLike?.(event);
     } else {
       this.emit(event);
     }

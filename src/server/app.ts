@@ -43,20 +43,27 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
   const leaderboard = new GiftLeaderboard();
   const records = new RecordStore(config.recordsFile, () => new Date(now()), log);
 
-  /** Ranking da rodada (zerado a cada partida) e o top da live (guardado entre partidas). */
+  /** Ranking da rodada (zerado a cada partida), pódio e o top da live (guardado entre partidas). */
   const leaderboardMessage = (): ServerMessage => ({
     type: "leaderboard",
     entries: leaderboard.top(LEADERBOARD_SIZE),
     allTime: records.topGifter(),
+    podium: leaderboard.podium(LEADERBOARD_SIZE),
   });
 
+  /** Versão do ranking já enviada: curtidas mudam o pódio sem gerar um envio por curtida. */
+  let sentLeaderboardVersion = -1;
   const broadcastLeaderboard = (): void => {
+    sentLeaderboardVersion = leaderboard.version;
     hub.broadcast(leaderboardMessage());
+  };
+  const broadcastLeaderboardIfChanged = (): void => {
+    if (leaderboard.version !== sentLeaderboardVersion) broadcastLeaderboard();
   };
 
   const emitEvent = (event: LiveEvent): void => {
     if (event.kind === "gift") {
-      leaderboard.add(event.userId, event.userName, event.diamonds);
+      leaderboard.add(event.userId, event.userName, event.diamonds, event.avatarUrl);
       records.addGift(event.userId, event.userName, event.diamonds);
       broadcastLeaderboard();
     }
@@ -73,6 +80,7 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
       gift: { capacity: 3, refillPerSecond: 0.5 },
     },
     globalRateLimit: { capacity: 200, refillPerSecond: 60 },
+    onLike: (event) => leaderboard.addLikes(event.userId, event.userName, event.count, event.avatarUrl),
   });
 
   const handler: HubHandler = {
@@ -124,6 +132,15 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
       if (message.type === "admin:resetLeaderboard") {
         leaderboard.reset();
         broadcastLeaderboard();
+        return;
+      }
+      // Testes de ondas valem também com o provedor real: quem os recebe é o jogo.
+      if (message.type === "admin:skipWave") {
+        hub.broadcastToRole("game", { type: "game:command", command: { kind: "skipWave" } });
+        return;
+      }
+      if (message.type === "admin:goToWave") {
+        hub.broadcastToRole("game", { type: "game:command", command: { kind: "goToWave", wave: message.wave } });
         return;
       }
       if (provider !== simulator) {
@@ -196,7 +213,10 @@ export function createGameServer(config: ServerConfig, now: () => number = Date.
 
     async start(): Promise<void> {
       hub.attach();
-      flushTimer = setInterval(() => pipeline.flushLikes(), LIKE_FLUSH_MS);
+      flushTimer = setInterval(() => {
+        pipeline.flushLikes();
+        broadcastLeaderboardIfChanged();
+      }, LIKE_FLUSH_MS);
       recordFlushTimer = setInterval(() => records.flush(), RECORD_FLUSH_MS);
       try {
         provider.start(sink);
