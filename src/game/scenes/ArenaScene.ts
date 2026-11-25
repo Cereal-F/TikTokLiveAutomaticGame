@@ -1,5 +1,4 @@
 import Phaser from "phaser";
-import type { ConnectionState } from "../../client/net/ReconnectingSocket.js";
 import type { LiveEvent } from "../../shared/events.js";
 import type { GameCommand, Podium, RunOutcome } from "../../shared/protocol.js";
 import { Autopilot } from "../core/autopilot.js";
@@ -48,7 +47,6 @@ export class ArenaScene extends Phaser.Scene {
   private hud!: Hud;
   /** Criado uma vez: a fila de resultados que ainda não chegaram ao servidor sobrevive entre partidas. */
   private liveFeed: LiveFeed | null = null;
-  private hudAlive = false;
   /** Avisos no meio da tela (quem enviou, o presente e o efeito), um por vez. */
   private spotlights = new SpotlightQueue();
   private spotlightView: SpotlightView | null = null;
@@ -103,18 +101,13 @@ export class ArenaScene extends Phaser.Scene {
     this.hud = new Hud(this);
     this.showRecord();
 
-    // Ao encerrar a cena (reinício automático), a conexão é fechada e não deve mais
-    // atualizar a HUD, cujos objetos podem já estar sendo destruídos.
-    this.hudAlive = true;
-    this.liveFeed ??= new LiveFeed((state: ConnectionState) => {
-      if (this.hudAlive) this.hud.setConnection(state);
-    });
+    // A conexão com a live fica só no servidor; a tela não mostra o estado dela.
+    this.liveFeed ??= new LiveFeed(() => undefined);
     this.liveFeed.start();
     // Cada partida é uma rodada nova: o servidor zera o top de presenteadores da rodada.
     this.liveFeed.reportRunStarted();
     this.spotlightView = new SpotlightView(this);
     this.events.once("shutdown", () => {
-      this.hudAlive = false;
       this.liveFeed?.stop();
       this.spotlightView?.destroy();
       this.spotlightView = null;
@@ -173,6 +166,8 @@ export class ArenaScene extends Phaser.Scene {
       phase: this.session.phase,
       turboRemainingMs: this.session.turboRemainingMs,
       shieldRemainingMs: this.session.shieldRemainingMs,
+      shieldHp: this.session.shieldHp,
+      shieldMaxHp: this.session.shieldMaxHp,
       berserkRemainingMs: this.session.berserkRemainingMs,
     });
   }
@@ -208,16 +203,10 @@ export class ArenaScene extends Phaser.Scene {
 
   private handleLiveEvent(event: LiveEvent): void {
     const outcome = this.session.applyLiveEvent(event);
-    this.hud.pushFeedback(outcome.feedback);
     if (outcome.spotlight) this.spotlights.push(outcome.spotlight);
     if (event.kind === "gift") {
       const power = powerForGift(event.diamonds);
       if (power) this.giftFlare(power);
-      const suffix = power ? ` > ${power.label}` : "";
-      this.hud.pushGift({
-        text: `${event.userName}: ${event.giftName} (${event.diamonds})${suffix}`,
-        tier: power ? giftTier(power) : 0,
-      });
     }
     this.handleSessionEvents(outcome.events);
   }
@@ -242,6 +231,13 @@ export class ArenaScene extends Phaser.Scene {
           this.player.flash();
           this.cameras.main.shake(120, 0.004);
           break;
+        case "shieldHit": {
+          // O escudo segurou o golpe: anel ciano no personagem (e pedaços se ele caiu).
+          const at = this.player.position;
+          shockwave(this, at.x, at.y, 52, 0x67e8f9, 300, 4);
+          if (event.broken) burst(this, at.x, at.y, { color: 0x67e8f9, count: 14, speed: 160, size: 5, lifeMs: 500 });
+          break;
+        }
         case "power":
           this.activatePower(event.power);
           break;

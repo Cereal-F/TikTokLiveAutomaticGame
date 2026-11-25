@@ -112,6 +112,14 @@ export const BERSERK = {
   moveMultiplier: 1.6,
 } as const;
 
+/**
+ * Escudo: além do tempo, tem uma reserva de dano que cada golpe gasta. Sem reserva, o escudo cai,
+ * mesmo com tempo sobrando. Assim, empilhar presentes não deixa o personagem imune para sempre.
+ */
+export const SHIELD = {
+  maxHp: 90,
+} as const;
+
 /** Reinício automático da partida após a derrota. */
 export const RUN = {
   /** Tempo na tela de fim de partida (com o pódio) antes da próxima partida começar. */

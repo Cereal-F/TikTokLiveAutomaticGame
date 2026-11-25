@@ -1,5 +1,5 @@
 import type { LiveEvent } from "../../shared/events.js";
-import { BERSERK, BOSS, CAMPAIGN, EFFECT_CAP_MS, LIVE_EFFECTS, PLAYER, WAVES } from "./constants.js";
+import { BERSERK, BOSS, CAMPAIGN, EFFECT_CAP_MS, LIVE_EFFECTS, PLAYER, SHIELD, WAVES } from "./constants.js";
 import { effectText, giftTier, grantFor, HITKILL_DAMAGE, powerForGift, type GiftPower } from "./powers.js";
 import { isProminentGift, likeTitle, type Spotlight } from "./spotlight.js";
 import { isFinalWave, killPoints, waveConfig, type WaveConfig } from "./waves.js";
@@ -15,6 +15,8 @@ export interface SessionStats {
 
 /** Acontecimentos que a cena precisa tratar (criar inimigos, mostrar banners, aplicar áreas, encerrar a partida). */
 export type SessionEvent =
+  /** O escudo absorveu um golpe; `broken` indica que a reserva acabou e o escudo caiu. */
+  | { type: "shieldHit"; absorbed: number; broken: boolean }
   /** `boss` é verdadeiro só para o chefe da onda, que é o primeiro inimigo criado nela. */
   | { type: "spawn"; boss: boolean }
   | { type: "waveStarted"; wave: number }
@@ -56,6 +58,8 @@ export class GameSession {
   private intermissionMs = 0;
   private turboMs = 0;
   private shieldMs = 0;
+  /** Reserva de dano que o escudo ainda absorve. */
+  private shieldHpLeft = 0;
   private berserkMs = 0;
   private likeProgress = 0;
 
@@ -116,6 +120,15 @@ export class GameSession {
     return this.shieldMs;
   }
 
+  /** Reserva de dano que o escudo ainda absorve. */
+  get shieldHp(): number {
+    return this.shieldHpLeft;
+  }
+
+  get shieldMaxHp(): number {
+    return SHIELD.maxHp;
+  }
+
   get berserkActive(): boolean {
     return this.berserkMs > 0;
   }
@@ -139,9 +152,9 @@ export class GameSession {
     return this.turboActive ? PLAYER.boostedProjectileDamage : PLAYER.projectileDamage;
   }
 
-  /** Verdadeiro durante a invulnerabilidade após um golpe, com o escudo ou com a fúria. */
+  /** Verdadeiro durante a invulnerabilidade após um golpe, ou com a fúria. O escudo absorve dano, não bloqueia tudo. */
   get isInvulnerable(): boolean {
-    return this.invulnerableMs > 0 || this.shieldMs > 0 || this.berserkMs > 0;
+    return this.invulnerableMs > 0 || this.berserkMs > 0;
   }
 
   start(): SessionEvent[] {
@@ -157,6 +170,7 @@ export class GameSession {
     this.invulnerableMs = Math.max(0, this.invulnerableMs - dtMs);
     this.turboMs = Math.max(0, this.turboMs - dtMs);
     this.shieldMs = Math.max(0, this.shieldMs - dtMs);
+    if (this.shieldMs === 0) this.shieldHpLeft = 0;
     this.berserkMs = Math.max(0, this.berserkMs - dtMs);
 
     if (this.currentPhase === "intermission") {
@@ -201,14 +215,28 @@ export class GameSession {
     return [];
   }
 
-  /** Aplica dano de contato. Há um período de invulnerabilidade após cada golpe. */
+  /**
+   * Aplica dano. Com escudo, a reserva absorve primeiro; o excedente vai para a vida.
+   * Há um período de invulnerabilidade após cada golpe, inclusive um golpe absorvido.
+   */
   damagePlayer(amount: number): SessionEvent[] {
     if (this.isOver || this.isInvulnerable || amount <= 0) return [];
 
-    this.currentHp = Math.max(0, this.currentHp - amount);
     this.invulnerableMs = PLAYER.invulnerabilityMs;
+    const events: SessionEvent[] = [];
+    let damage = amount;
+    if (this.shieldMs > 0) {
+      const absorbed = Math.min(this.shieldHpLeft, damage);
+      this.shieldHpLeft -= absorbed;
+      damage -= absorbed;
+      const broken = this.shieldHpLeft <= 0;
+      if (broken) this.shieldMs = 0;
+      events.push({ type: "shieldHit", absorbed, broken });
+    }
+    if (damage <= 0) return events;
 
-    const events: SessionEvent[] = [{ type: "playerHit", damage: amount, hp: this.currentHp }];
+    this.currentHp = Math.max(0, this.currentHp - damage);
+    events.push({ type: "playerHit", damage, hp: this.currentHp });
     if (this.currentHp === 0) {
       this.currentPhase = "defeated";
       events.push({ type: "defeated", stats: this.stats() });
@@ -226,9 +254,10 @@ export class GameSession {
     this.turboMs = Math.min(EFFECT_CAP_MS, this.turboMs + durationMs);
   }
 
-  /** Escudo: o tempo se soma ao que já existe, até o teto de EFFECT_CAP_MS. */
-  activateShield(durationMs: number): void {
+  /** Escudo: o tempo e a reserva de dano se somam ao que já existe, até os seus tetos. */
+  activateShield(durationMs: number, hp: number): void {
     this.shieldMs = Math.min(EFFECT_CAP_MS, this.shieldMs + durationMs);
+    this.shieldHpLeft = Math.min(SHIELD.maxHp, this.shieldHpLeft + hp);
   }
 
   /** Fúria: o tempo se soma ao que já existe, até o teto de EFFECT_CAP_MS. */
@@ -294,7 +323,7 @@ export class GameSession {
         feedback.push({ text: `PODER ${power.label}`, tone: "power" });
         const grant = grantFor(power, count);
         this.activateTurbo(grant.turboMs);
-        this.activateShield(grant.shieldMs);
+        this.activateShield(grant.shieldMs, grant.shieldHp);
         this.activateBerserk(grant.berserkMs);
         this.heal(power.heal);
         return { feedback, events: [{ type: "power", power, count }], spotlight };

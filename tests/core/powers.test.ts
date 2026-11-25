@@ -31,8 +31,8 @@ describe("giftTier", () => {
 describe("powerSummary", () => {
   it("descreve cada poder com o efeito principal", () => {
     expect(powerSummary(GIFT_POWERS[0]!)).toContain("ataque");
-    expect(powerSummary(GIFT_POWERS[1]!)).toContain("invulnerável");
+    expect(powerSummary(GIFT_POWERS[1]!)).toContain("absorve");
     expect(powerSummary(GIFT_POWERS[2]!)).toContain("fúria");
-    expect(powerSummary(GIFT_POWERS[3]!)).toContain("+30 vida");
+    expect(powerSummary(GIFT_POWERS[3]!)).toContain("tela toda");
   });
 });

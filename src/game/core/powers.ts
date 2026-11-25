@@ -25,6 +25,8 @@ export interface GiftPower {
   turboMs: number;
   /** Escudo por unidade (0 = não ativa escudo). Acumula com outros presentes. */
   shieldMs: number;
+  /** Reserva de dano do escudo por unidade (0 = sem reserva). Cada golpe gasta a reserva. */
+  shieldHp: number;
   /** Fúria por unidade (0 = não ativa fúria). Acumula com outros presentes. */
   berserkMs: number;
   /** Dano em área aplicado uma vez por presente (0 = sem explosão). */
@@ -38,9 +40,9 @@ export interface GiftPower {
 /** Em ordem crescente de `minDiamonds`. */
 export const GIFT_POWERS: readonly GiftPower[] = [
   // Rosa (1+): ataque em dobro. Cada rosa soma 8 s, então mandar várias rosas aumenta o turbo.
-  { kind: "turbo", label: "TURBO", minDiamonds: 1, turboMs: 8_000, shieldMs: 0, berserkMs: 0, blastDamage: 0, blastRadius: 0, heal: 0 },
+  { kind: "turbo", label: "TURBO", minDiamonds: 1, turboMs: 8_000, shieldMs: 0, shieldHp: 0, berserkMs: 0, blastDamage: 0, blastRadius: 0, heal: 0 },
   // Chapéu (20+): imunidade a dano. Também soma por unidade.
-  { kind: "shield", label: "ESCUDO", minDiamonds: 20, turboMs: 0, shieldMs: 6_000, berserkMs: 0, blastDamage: 0, blastRadius: 0, heal: 0 },
+  { kind: "shield", label: "ESCUDO", minDiamonds: 20, turboMs: 0, shieldMs: 6_000, shieldHp: 30, berserkMs: 0, blastDamage: 0, blastRadius: 0, heal: 0 },
   // Leão (100+): fúria, com explosão que limpa os inimigos em volta do personagem.
   {
     kind: "nova",
@@ -48,6 +50,7 @@ export const GIFT_POWERS: readonly GiftPower[] = [
     minDiamonds: 100,
     turboMs: 0,
     shieldMs: 0,
+    shieldHp: 0,
     berserkMs: LION_FURY_MS,
     blastDamage: HITKILL_DAMAGE,
     blastRadius: 280,
@@ -60,6 +63,7 @@ export const GIFT_POWERS: readonly GiftPower[] = [
     minDiamonds: 500,
     turboMs: 0,
     shieldMs: 0,
+    shieldHp: 0,
     berserkMs: FURY_MS,
     blastDamage: HITKILL_DAMAGE,
     blastRadius: Number.POSITIVE_INFINITY,
@@ -83,6 +87,7 @@ export function powerForGift(unitDiamonds: number): GiftPower | null {
 export interface GiftGrant {
   turboMs: number;
   shieldMs: number;
+  shieldHp: number;
   berserkMs: number;
 }
 
@@ -91,6 +96,7 @@ export function grantFor(power: GiftPower, count: number): GiftGrant {
   return {
     turboMs: power.turboMs * units,
     shieldMs: power.shieldMs * units,
+    shieldHp: power.shieldHp * units,
     berserkMs: power.berserkMs * units,
   };
 }
@@ -108,7 +114,7 @@ export function effectText(power: GiftPower, count: number): string {
     case "turbo":
       return `+${seconds(grant.turboMs)} s de TURBO`;
     case "shield":
-      return `+${seconds(grant.shieldMs)} s de ESCUDO`;
+      return `+${seconds(grant.shieldMs)} s de ESCUDO · absorve ${grant.shieldHp}`;
     case "nova":
       return `+${seconds(grant.berserkMs)} s de FÚRIA · explosão`;
     case "storm":
@@ -123,10 +129,10 @@ export function powerSummary(power: GiftPower): string {
     case "turbo":
       return `ataque ${LIVE_EFFECTS.boostAttackSpeedMultiplier}x e dano x2 · ${seconds(power.turboMs)}s cada`;
     case "shield":
-      return `invulnerável · ${seconds(power.shieldMs)}s cada`;
+      return `absorve ${power.shieldHp} · ${seconds(power.shieldMs)}s cada`;
     case "nova":
       return `fúria ${seconds(power.berserkMs)}s · explosão`;
     case "storm":
-      return `fúria ${seconds(power.berserkMs)}s · tela toda · +${power.heal} vida`;
+      return `fúria ${seconds(power.berserkMs)}s · tela toda`;
   }
 }

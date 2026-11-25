@@ -190,13 +190,15 @@ describe("GameSession: presentes e poderes", () => {
     expect(feedback.map((f) => f.tone)).toEqual(["boost", "power"]);
   });
 
-  it("um presente de 20 diamantes ativa o escudo e o jogador fica invulnerável", () => {
+  it("um presente de 20 diamantes ativa o escudo, que absorve o dano até a reserva acabar", () => {
     const session = new GameSession();
     session.start();
     session.applyLiveEvent(giftEvent("g1", "u1", "Chapéu", 20));
     expect(session.shieldActive).toBe(true);
-    expect(session.isInvulnerable).toBe(true);
-    expect(session.damagePlayer(8)).toEqual([]);
+    expect(session.shieldHp).toBe(GIFT_POWERS[1]!.shieldHp);
+    expect(session.isInvulnerable).toBe(false);
+    const events = session.damagePlayer(8);
+    expect(events.map((event) => event.type)).toEqual(["shieldHit"]);
     expect(session.hp).toBe(PLAYER.maxHp);
   });
 
