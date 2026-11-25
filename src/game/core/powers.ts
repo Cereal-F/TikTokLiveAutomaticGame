@@ -10,8 +10,11 @@ export type GiftPowerKind = "turbo" | "shield" | "nova" | "storm";
 /** Dano que mata qualquer inimigo ou chefe de um golpe. */
 export const HITKILL_DAMAGE = BERSERK.hitKillDamage;
 
-/** Duração da fúria por unidade: dá para limpar cerca de 10 fases (100 e 500 têm a mesma fúria). */
+/** Fúria do presente de 500 (Foguete): dá para limpar cerca de 10 fases. */
 export const FURY_MS = 90_000;
+
+/** Fúria do presente de 100 (Leão): metade da do Foguete. Só o Foguete limpa a tela e cura. */
+export const LION_FURY_MS = 45_000;
 
 export interface GiftPower {
   kind: GiftPowerKind;
@@ -45,12 +48,12 @@ export const GIFT_POWERS: readonly GiftPower[] = [
     minDiamonds: 100,
     turboMs: 0,
     shieldMs: 0,
-    berserkMs: FURY_MS,
+    berserkMs: LION_FURY_MS,
     blastDamage: HITKILL_DAMAGE,
     blastRadius: 280,
     heal: 0,
   },
-  // Foguete (500+): a mesma fúria do leão, mais explosão na tela inteira e cura.
+  // Foguete (500+): fúria mais longa, explosão na tela inteira e cura.
   {
     kind: "storm",
     label: "TEMPESTADE",
